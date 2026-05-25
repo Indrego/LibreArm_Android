@@ -11,8 +11,8 @@ android {
         applicationId = "com.ptylr.librearm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.3.0"
+        versionCode = 3
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -44,11 +44,10 @@ android {
     }
 
     lint {
-        // The bare upstream base carries pre-existing lint errors (e.g. a
-        // BluetoothGatt#writeCharacteristic call needing an API-33 guard) that
-        // the iOS port fixes one commit later. Don't fail the build on them
-        // here; the port re-enables abortOnError once the code is clean.
-        abortOnError = false
+        // Our code is lint-clean: BLE/notification calls that lint flags for
+        // MissingPermission are @SuppressLint-annotated where the runtime guard
+        // lives in a helper lint can't follow. Fail the build on any lint error.
+        abortOnError = true
     }
 
     compileOptions {
@@ -75,6 +74,7 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.02.00"))
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

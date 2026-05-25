@@ -23,6 +23,7 @@ import androidx.core.content.ContextCompat
 import com.ptylr.librearm.model.BpReading
 import com.ptylr.librearm.model.BpState
 import com.ptylr.librearm.model.MeasurementMode
+import com.ptylr.librearm.notifications.BatteryNotifier
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.math.pow
@@ -37,11 +38,13 @@ import kotlinx.coroutines.launch
 /**
  * BLE client for QardioArm blood pressure cuff.
  * Mirrors the iOS BPClient behaviors: connection management, session debouncing,
- * average-of-3 mode with adjustable delay, and final reading callback.
+ * average-of-3 mode with adjustable delay, battery monitoring with low/critical
+ * thresholds, strict reading validation, and final reading callback.
  */
 class BpClient(
     private val context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val batteryNotifier: BatteryNotifier? = null
 ) {
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val adapter: BluetoothAdapter? get() = bluetoothManager.adapter
@@ -54,6 +57,7 @@ class BpClient(
     private var gatt: BluetoothGatt? = null
     private var measurementCharacteristic: BluetoothGattCharacteristic? = null
     private var controlCharacteristic: BluetoothGattCharacteristic? = null
+    private var batteryCharacteristic: BluetoothGattCharacteristic? = null
 
     private var connectTimeoutJob: Job? = null
     private var finalizeJob: Job? = null
@@ -64,12 +68,16 @@ class BpClient(
     private var remainingRuns = 0
     private val accumulatedReadings = mutableListOf<BpReading>()
 
+    private var lastBatteryState: BatteryState = BatteryState.UNKNOWN
+
     private val completionDebounceSeconds = 1.5
 
     // UUIDs
     private val bpsService = UUID.fromString("00001810-0000-1000-8000-00805f9b34fb")
     private val measurement = UUID.fromString("00002a35-0000-1000-8000-00805f9b34fb")
     private val control = UUID.fromString("583CB5B3-875D-40ED-9098-C39EB0C1983D")
+    private val batteryService = UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
+    private val batteryLevel = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
 
     private val startCommand = byteArrayOf(0xF1.toByte(), 0x01)
     private val cancelCommand = byteArrayOf(0xF1.toByte(), 0x02)
@@ -82,6 +90,7 @@ class BpClient(
         _state.update { it.copy(delayBetweenRunsSeconds = seconds) }
     }
 
+    @SuppressLint("MissingPermission")
     fun startConnect(timeoutSeconds: Long = 30) {
         if (!hasBlePermission()) {
             _state.update { it.copy(status = "Bluetooth permission required") }
@@ -121,6 +130,18 @@ class BpClient(
     fun startMeasurement() {
         if (!_state.value.canMeasure || _state.value.isMeasuring) return
 
+        val battery = _state.value.batteryLevelPct
+        if (battery != null && battery <= CRITICAL_BATTERY) {
+            _state.update {
+                it.copy(status = "Battery critical ($battery%). Replace batteries to measure.")
+            }
+            return
+        }
+
+        // NOTE: do not initiate a GATT read here. Android BLE only allows one
+        // operation in flight at a time, and a read queued just before the
+        // start-command write causes the write to be silently dropped on some
+        // devices. Battery is re-read after each measurement completes.
         sessionActive = true
         hasFiredFinal = false
         accumulatedReadings.clear()
@@ -149,6 +170,7 @@ class BpClient(
         _state.update { it.copy(status = "Connected — ready", isMeasuring = false) }
     }
 
+    @SuppressLint("MissingPermission")
     fun cleanup() {
         stopScan()
         finalizeJob?.cancel()
@@ -156,6 +178,23 @@ class BpClient(
         connectTimeoutJob?.cancel()
         gatt?.close()
         gatt = null
+    }
+
+    /**
+     * Strict blood pressure validation matching the iOS v1.4.0 rules:
+     * - Both values finite, diastolic > 0
+     * - Systolic in 60..260, diastolic in 40..160
+     * - Systolic strictly greater than diastolic
+     * - Pulse pressure (sys − dia) ≤ 120
+     */
+    fun isValidReading(r: BpReading): Boolean {
+        if (r.dia <= 0) return false
+        if (!r.sys.isFinite() || !r.dia.isFinite()) return false
+        if (r.sys !in 60.0..260.0) return false
+        if (r.dia !in 40.0..160.0) return false
+        if (r.sys <= r.dia) return false
+        if ((r.sys - r.dia) > 120.0) return false
+        return true
     }
 
     private fun hasBlePermission(): Boolean {
@@ -208,6 +247,47 @@ class BpClient(
         )
     }
 
+    @SuppressLint("MissingPermission")
+    private fun readBatteryLevel() {
+        val char = batteryCharacteristic ?: return
+        gatt?.readCharacteristic(char)
+    }
+
+    private fun updateBatteryStatus(level: Int?) {
+        if (level == null) {
+            _state.update {
+                it.copy(batteryLevelPct = null, batteryStatusLine = "Battery: unavailable")
+            }
+            return
+        }
+
+        val statusLine = when {
+            level <= CRITICAL_BATTERY -> "Battery: $level% (Critical)"
+            level <= LOW_BATTERY -> "Battery: $level% (Low)"
+            else -> "Battery: $level%"
+        }
+        _state.update { it.copy(batteryLevelPct = level, batteryStatusLine = statusLine) }
+
+        val newState = when {
+            level <= CRITICAL_BATTERY -> BatteryState.CRITICAL
+            level <= LOW_BATTERY -> BatteryState.LOW
+            else -> BatteryState.NORMAL
+        }
+
+        if (newState != lastBatteryState) {
+            when (newState) {
+                BatteryState.CRITICAL -> if (lastBatteryState != BatteryState.CRITICAL) {
+                    batteryNotifier?.notifyBattery(level, isCritical = true)
+                }
+                BatteryState.LOW -> if (lastBatteryState == BatteryState.NORMAL || lastBatteryState == BatteryState.UNKNOWN) {
+                    batteryNotifier?.notifyBattery(level, isCritical = false)
+                }
+                else -> Unit
+            }
+            lastBatteryState = newState
+        }
+    }
+
     private val scanCallback = object : ScanCallback() {
         @SuppressLint("MissingPermission")
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
@@ -229,12 +309,16 @@ class BpClient(
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 measurementCharacteristic = null
                 controlCharacteristic = null
+                batteryCharacteristic = null
+                lastBatteryState = BatteryState.UNKNOWN
                 _state.update {
                     it.copy(
                         isConnected = false,
                         canMeasure = false,
                         isMeasuring = false,
-                        status = "Disconnected"
+                        status = "Disconnected",
+                        batteryLevelPct = null,
+                        batteryStatusLine = "Battery: unavailable"
                     )
                 }
             }
@@ -242,19 +326,42 @@ class BpClient(
 
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            val service = gatt.getService(bpsService)
-            if (service != null) {
-                setupCharacteristics(gatt, service)
+            val bp = gatt.getService(bpsService)
+            if (bp != null) {
+                setupBpCharacteristics(gatt, bp)
             } else {
                 _state.update { it.copy(status = "Blood Pressure service not found") }
+            }
+
+            val battery = gatt.getService(batteryService)
+            if (battery != null) {
+                setupBatteryCharacteristic(gatt, battery)
             }
         }
 
         @SuppressLint("MissingPermission")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            if (characteristic.uuid == measurement) {
+            when (characteristic.uuid) {
+                measurement -> {
+                    val data = characteristic.value ?: return
+                    parseMeasurement(data)
+                }
+                batteryLevel -> {
+                    val data = characteristic.value ?: return
+                    parseBatteryLevel(data)
+                }
+            }
+        }
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            if (status != BluetoothGatt.GATT_SUCCESS) return
+            if (characteristic.uuid == batteryLevel) {
                 val data = characteristic.value ?: return
-                parseMeasurement(data)
+                parseBatteryLevel(data)
             }
         }
 
@@ -270,7 +377,7 @@ class BpClient(
     }
 
     @SuppressLint("MissingPermission")
-    private fun setupCharacteristics(gatt: BluetoothGatt, service: BluetoothGattService) {
+    private fun setupBpCharacteristics(gatt: BluetoothGatt, service: BluetoothGattService) {
         measurementCharacteristic = service.getCharacteristic(measurement)
         controlCharacteristic = service.getCharacteristic(control)
 
@@ -286,6 +393,31 @@ class BpClient(
 
         val ready = measurementCharacteristic != null && controlCharacteristic != null
         _state.update { it.copy(canMeasure = ready, status = if (ready) "Connected — ready" else "Discovering…") }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun setupBatteryCharacteristic(gatt: BluetoothGatt, service: BluetoothGattService) {
+        val char = service.getCharacteristic(batteryLevel) ?: return
+        batteryCharacteristic = char
+        gatt.readCharacteristic(char)
+
+        val supportsNotify = (char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
+        if (supportsNotify) {
+            gatt.setCharacteristicNotification(char, true)
+            val descriptor = char.getDescriptor(UUID.fromString(CLIENT_CONFIG_UUID))
+            descriptor?.let {
+                it.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                gatt.writeDescriptor(it)
+            }
+        }
+    }
+
+    private fun parseBatteryLevel(data: ByteArray) {
+        if (data.isEmpty()) return
+        val level = data[0].toInt() and 0xFF
+        if (level in 0..100) {
+            updateBatteryStatus(level)
+        }
     }
 
     private fun parseMeasurement(data: ByteArray) {
@@ -329,8 +461,25 @@ class BpClient(
         val reading = _state.value.lastReading ?: return
         if (!sessionActive || hasFiredFinal || reading.dia <= 0) return
 
+        // Strict validation: reject invalid readings outright.
+        if (!isValidReading(reading)) {
+            sessionActive = false
+            hasFiredFinal = true
+            remainingRuns = 0
+            accumulatedReadings.clear()
+            _state.update {
+                it.copy(
+                    lastReading = null,
+                    isMeasuring = false,
+                    status = "Measurement invalid or incomplete — please try again. Check cuff fit and battery."
+                )
+            }
+            readBatteryLevel()
+            return
+        }
+
         if (_state.value.measurementMode == MeasurementMode.AVERAGE3) {
-            if (isPlausible(reading)) accumulatedReadings.add(reading)
+            accumulatedReadings.add(reading)
 
             if (remainingRuns > 1) {
                 remainingRuns -= 1
@@ -338,13 +487,49 @@ class BpClient(
                 return
             }
 
+            // Last run: require all 3 valid readings (any invalid was already rejected above).
+            if (accumulatedReadings.size < 3) {
+                sessionActive = false
+                hasFiredFinal = true
+                remainingRuns = 0
+                accumulatedReadings.clear()
+                _state.update {
+                    it.copy(
+                        lastReading = null,
+                        isMeasuring = false,
+                        status = "Average session invalid — not all readings were valid. Please try again."
+                    )
+                }
+                readBatteryLevel()
+                return
+            }
+
             val avg = average(accumulatedReadings)
+            if (!isValidReading(avg)) {
+                sessionActive = false
+                hasFiredFinal = true
+                remainingRuns = 0
+                accumulatedReadings.clear()
+                _state.update {
+                    it.copy(
+                        lastReading = null,
+                        isMeasuring = false,
+                        status = "Average reading invalid — please try again."
+                    )
+                }
+                readBatteryLevel()
+                return
+            }
+
             sessionActive = false
             hasFiredFinal = true
-            _state.update { it.copy(status = "Connected — ready", isMeasuring = false) }
-            onFinalReading?.invoke(avg)
-            accumulatedReadings.clear()
             remainingRuns = 0
+            accumulatedReadings.clear()
+            _state.update {
+                it.copy(lastReading = avg, status = "Connected — ready", isMeasuring = false)
+            }
+            onFinalReading?.invoke(avg)
+            readBatteryLevel()
             return
         }
 
@@ -352,6 +537,7 @@ class BpClient(
         hasFiredFinal = true
         _state.update { it.copy(status = "Connected — ready", isMeasuring = false) }
         onFinalReading?.invoke(reading)
+        readBatteryLevel()
     }
 
     private fun launchCountdownAndNextRun() {
@@ -382,12 +568,8 @@ class BpClient(
     }
 
     private fun average(readings: List<BpReading>): BpReading {
-        val valid = readings.filter { isPlausible(it) }
-        if (valid.isEmpty()) {
-            val last = _state.value.lastReading
-            if (last != null && isPlausible(last)) return last
-            return BpReading(0.0, 0.0, null, null)
-        }
+        val valid = readings.filter { isValidReading(it) }
+        if (valid.isEmpty()) return BpReading(0.0, 0.0, null, null)
 
         val n = valid.size.toDouble()
         val sysAvg = valid.sumOf { it.sys } / n
@@ -402,12 +584,11 @@ class BpClient(
         return BpReading(sys = sysAvg, dia = diaAvg, map = mapAvg, hr = hrAvg)
     }
 
-    private fun isPlausible(reading: BpReading): Boolean {
-        if (!reading.sys.isFinite() || !reading.dia.isFinite()) return false
-        return reading.sys in 60.0..260.0 && reading.dia in 40.0..160.0
-    }
+    private enum class BatteryState { UNKNOWN, NORMAL, LOW, CRITICAL }
 
     companion object {
         private const val CLIENT_CONFIG_UUID = "00002902-0000-1000-8000-00805f9b34fb"
+        private const val LOW_BATTERY = 20
+        private const val CRITICAL_BATTERY = 10
     }
 }
