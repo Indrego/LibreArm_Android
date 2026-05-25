@@ -103,6 +103,10 @@ xcuserdata/
 app/build/
 .cxx/
 *.keystore
+# ...but commit the shared debug keystore so clean checkouts can build
+# (see app/build.gradle.kts: signingConfigs.sharedDebug). Debug keystores
+# carry no secret — standard android/androiddebugkey credentials.
+!debug.keystore
 
 # Swift Package Manager
 .swiftpm/
