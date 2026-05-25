@@ -7,10 +7,12 @@ import com.ptylr.librearm.ble.BpClient
 import com.ptylr.librearm.model.BpReading
 import com.ptylr.librearm.model.BpState
 import com.ptylr.librearm.model.MeasurementMode
+import com.ptylr.librearm.notifications.BatteryNotifier
 import kotlinx.coroutines.flow.StateFlow
 
 class BpViewModel(application: Application) : AndroidViewModel(application) {
-    private val client = BpClient(application.applicationContext, viewModelScope)
+    private val batteryNotifier = BatteryNotifier(application.applicationContext)
+    private val client = BpClient(application.applicationContext, viewModelScope, batteryNotifier)
 
     val state: StateFlow<BpState> = client.state
 

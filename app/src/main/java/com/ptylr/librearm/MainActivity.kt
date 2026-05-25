@@ -14,15 +14,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,9 +29,10 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -51,16 +50,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.ptylr.librearm.health.HealthConnectManager
 import com.ptylr.librearm.model.BpState
 import com.ptylr.librearm.model.MeasurementMode
+import com.ptylr.librearm.ui.HypertensionGraphView
 import com.ptylr.librearm.ui.theme.LibreArmTheme
 import java.util.Date
 import kotlin.math.abs
@@ -72,6 +71,7 @@ class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("librearm_prefs", MODE_PRIVATE) }
     private val prefKeyHealth = "pref_auto_health"
     private val prefKeyAverage = "pref_average_three"
+    private val prefKeyDelay = "pref_delay_between_runs"
 
     private val blePermissions: Array<String>
         get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity() {
                 val state by viewModel.state.collectAsState()
                 val savedHealthPref = prefs.getBoolean(prefKeyHealth, false)
                 val savedAveragePref = prefs.getBoolean(prefKeyAverage, false)
+                val savedDelayPref = prefs.getInt(prefKeyDelay, 30)
                 var autoSaveToHealth by rememberSaveable { mutableStateOf(savedHealthPref) }
                 var healthGranted by remember { mutableStateOf(false) }
                 var healthAvailable by remember { mutableStateOf(HealthConnectManager.Availability.Unknown) }
@@ -102,8 +103,6 @@ class MainActivity : ComponentActivity() {
                 ) { result ->
                     if (result.values.all { it }) {
                         viewModel.startConnect()
-                    } else {
-                        // leave status as-is; user can retry after granting
                     }
                 }
 
@@ -117,6 +116,10 @@ class MainActivity : ComponentActivity() {
                     prefs.edit().putBoolean(prefKeyHealth, autoSaveToHealth).apply()
                 }
 
+                val notificationsLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { /* battery alerts are best-effort */ }
+
                 LaunchedEffect(Unit) {
                     if (!hasBlePermissions()) {
                         permissionsLauncher.launch(blePermissions)
@@ -128,9 +131,18 @@ class MainActivity : ComponentActivity() {
                     if (savedAveragePref) {
                         viewModel.setMeasurementMode(MeasurementMode.AVERAGE3)
                     }
+                    viewModel.setDelayBetweenRuns(savedDelayPref)
                     if (!healthGranted && autoSaveToHealth) {
                         autoSaveToHealth = false
                         prefs.edit().putBoolean(prefKeyHealth, false).apply()
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            this@MainActivity,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
                 }
 
@@ -204,12 +216,9 @@ class MainActivity : ComponentActivity() {
                         prefs.edit().putBoolean(prefKeyAverage, it == MeasurementMode.AVERAGE3).apply()
                     },
                     onDelayChange = { viewModel.setDelayBetweenRuns(it) },
-                    onRequestHealthPermissions = {
-                        if (healthAvailable == HealthConnectManager.Availability.Available) {
-                            healthPermissionLauncher.launch(healthManager.permissions)
-                        } else {
-                            runCatching { startActivity(healthManager.installIntent()) }
-                        }
+                    onDelayChangeFinished = { snapped ->
+                        viewModel.setDelayBetweenRuns(snapped)
+                        prefs.edit().putInt(prefKeyDelay, snapped).apply()
                     },
                     onOpenLink = { openUrl(it) }
                 )
@@ -242,59 +251,84 @@ private fun LibreArmScreen(
     onRetryConnect: () -> Unit,
     onMeasurementModeChange: (MeasurementMode) -> Unit,
     onDelayChange: (Int) -> Unit,
-    onRequestHealthPermissions: () -> Unit,
+    onDelayChangeFinished: (Int) -> Unit,
     onOpenLink: (String) -> Unit
 ) {
+    val batteryCritical = (state.batteryLevelPct ?: 100) <= 10
+    val batteryLow = (state.batteryLevelPct ?: 100) <= 20
+    val batteryColor = when {
+        batteryCritical || batteryLow -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.secondary
+    }
+    val averageMode = state.measurementMode == MeasurementMode.AVERAGE3
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.ic_launcher_foreground),
-                contentDescription = null,
-                modifier = Modifier.height(96.dp)
-            )
-            Text(text = "LibreArm", style = MaterialTheme.typography.titleLarge)
-            Text(
-                text = state.status,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.secondary,
-                textAlign = TextAlign.Center
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("LibreArm", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "Blood Pressure",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
 
-            state.lastReading?.let { reading ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                    shape = RoundedCornerShape(16.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    state.status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+                Text(
+                    state.batteryStatusLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = batteryColor
+                )
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "${reading.sys.toInt()}/${reading.dia.toInt()} mmHg",
-                            style = MaterialTheme.typography.headlineMedium
-                        )
+                    val reading = state.lastReading
+                    if (reading != null) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Text(
+                                text = "${reading.sys.toInt()}/${reading.dia.toInt()} mmHg",
+                                style = MaterialTheme.typography.headlineSmall
+                            )
                             reading.map?.let {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(imageVector = Icons.Default.Speed, contentDescription = null)
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(text = "${it.toInt()} MAP", modifier = Modifier.padding(start = 6.dp))
+                                    Text("${it.toInt()} MAP", modifier = Modifier.padding(start = 4.dp))
                                 }
                             }
                             reading.hr?.let {
@@ -304,10 +338,31 @@ private fun LibreArmScreen(
                                         contentDescription = null,
                                         tint = Color.Red
                                     )
-                                    Text(text = "${it.toInt()} bpm", modifier = Modifier.padding(start = 6.dp))
+                                    Text("${it.toInt()} bpm", modifier = Modifier.padding(start = 4.dp))
                                 }
                             }
                         }
+                        HypertensionGraphView(
+                            systolic = reading.sys,
+                            diastolic = reading.dia,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                        )
+                    } else {
+                        Text(
+                            "No reading yet",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        HypertensionGraphView(
+                            systolic = 120.0,
+                            diastolic = 80.0,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .alpha(0.3f)
+                        )
                     }
                 }
             }
@@ -315,7 +370,12 @@ private fun LibreArmScreen(
             Button(
                 onClick = onStartStop,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = state.canMeasure || state.isMeasuring
+                enabled = state.isMeasuring || (state.canMeasure && !batteryCritical),
+                colors = if (state.isMeasuring) {
+                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                } else {
+                    ButtonDefaults.buttonColors()
+                }
             ) {
                 Text(if (state.isMeasuring) "Stop Measurement" else "Start Measurement")
             }
@@ -325,7 +385,7 @@ private fun LibreArmScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.padding(end = 8.dp)) {
                     Text("Save to Health Connect")
                     if (!healthAuthorized) {
                         Text(
@@ -342,9 +402,7 @@ private fun LibreArmScreen(
                 }
                 Switch(
                     checked = autoSaveToHealth,
-                    onCheckedChange = {
-                        onAutoSaveChange(it)
-                    },
+                    onCheckedChange = onAutoSaveChange,
                     enabled = !state.isMeasuring && !healthRequestInFlight
                 )
             }
@@ -356,7 +414,7 @@ private fun LibreArmScreen(
             ) {
                 Text("Average (3 readings)")
                 Switch(
-                    checked = state.measurementMode == MeasurementMode.AVERAGE3,
+                    checked = averageMode,
                     onCheckedChange = {
                         onMeasurementModeChange(if (it) MeasurementMode.AVERAGE3 else MeasurementMode.SINGLE)
                     },
@@ -364,33 +422,29 @@ private fun LibreArmScreen(
                 )
             }
 
-            if (state.measurementMode == MeasurementMode.AVERAGE3) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Delay between readings (seconds)")
-                        Text("${state.delayBetweenRunsSeconds}s", color = MaterialTheme.colorScheme.secondary)
-                    }
-                    Slider(
-                        value = state.delayBetweenRunsSeconds.toFloat(),
-                        onValueChange = { onDelayChange(it.toInt()) },
-                        valueRange = 15f..60f,
-                        steps = 2,
-                        enabled = !state.isMeasuring,
-                        onValueChangeFinished = {
-                            val options = listOf(15, 30, 45, 60)
-                            val closest = options.minByOrNull { abs(it - state.delayBetweenRunsSeconds) } ?: 30
-                            onDelayChange(closest)
-                        }
-                    )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Delay between readings (seconds)")
                     Text(
-                        text = "Options: 15s, 30s, 45s, or 60s",
-                        style = MaterialTheme.typography.bodySmall,
+                        "${state.delayBetweenRunsSeconds}s",
                         color = MaterialTheme.colorScheme.secondary
                     )
                 }
+                Slider(
+                    value = state.delayBetweenRunsSeconds.toFloat(),
+                    onValueChange = { onDelayChange(it.toInt()) },
+                    valueRange = 15f..60f,
+                    steps = 2,
+                    enabled = !state.isMeasuring && averageMode,
+                    onValueChangeFinished = {
+                        val options = listOf(15, 30, 45, 60)
+                        val closest = options.minByOrNull { abs(it - state.delayBetweenRunsSeconds) } ?: 30
+                        onDelayChangeFinished(closest)
+                    }
+                )
             }
 
             if (!state.isConnected) {
@@ -407,40 +461,34 @@ private fun LibreArmScreen(
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Divider()
+            HorizontalDivider()
             Text(
                 text = "Original iOS app by Paul Taylor — Android port by agreenbhm",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.secondary
             )
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                TextButton(onClick = { onOpenLink("https://github.com/ptylr/LibreArm") }) {
                     Icon(
                         imageVector = Icons.Default.Link,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    TextButton(onClick = { onOpenLink("https://github.com/ptylr/LibreArm") }) {
-                        Text("iOS GitHub")
-                    }
+                    Text("iOS GitHub", modifier = Modifier.padding(start = 4.dp))
                 }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
+                TextButton(onClick = { onOpenLink("https://github.com/agreenbhm/librearm_android") }) {
                     Icon(
                         imageVector = Icons.Default.Link,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    TextButton(onClick = { onOpenLink("https://github.com/agreenbhm/librearm_android") }) {
-                        Text("Android GitHub")
-                    }
+                    Text("Android GitHub", modifier = Modifier.padding(start = 4.dp))
                 }
             }
         }
