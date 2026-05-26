@@ -54,6 +54,8 @@ class BpClient(
 
     var onFinalReading: ((BpReading) -> Unit)? = null
 
+    private val gattQueue = GattOperationQueue()
+
     private var gatt: BluetoothGatt? = null
     private var measurementCharacteristic: BluetoothGattCharacteristic? = null
     private var controlCharacteristic: BluetoothGattCharacteristic? = null
@@ -138,10 +140,6 @@ class BpClient(
             return
         }
 
-        // NOTE: do not initiate a GATT read here. Android BLE only allows one
-        // operation in flight at a time, and a read queued just before the
-        // start-command write causes the write to be silently dropped on some
-        // devices. Battery is re-read after each measurement completes.
         sessionActive = true
         hasFiredFinal = false
         accumulatedReadings.clear()
@@ -156,11 +154,18 @@ class BpClient(
             _state.update { it.copy(status = "Measuring…", isMeasuring = true) }
         }
 
-        performSingleRunStart()
+        scope.launch {
+            // Each op suspends on the queue, so battery read + start write are serialized
+            // and the start-command write is never silently dropped.
+            readBatteryLevelQueued()
+            performSingleRunStart()
+        }
     }
 
     fun cancelMeasurement() {
-        writeControl(cancelCommand)
+        scope.launch {
+            controlCharacteristic?.let { queueWriteCharacteristic(it, cancelCommand) }
+        }
         remainingRuns = 0
         accumulatedReadings.clear()
         sessionActive = false
@@ -176,6 +181,7 @@ class BpClient(
         finalizeJob?.cancel()
         countdownJob?.cancel()
         connectTimeoutJob?.cancel()
+        gattQueue.reset()
         gatt?.close()
         gatt = null
     }
@@ -233,24 +239,60 @@ class BpClient(
     }
 
     @SuppressLint("MissingPermission")
-    private fun performSingleRunStart() {
-        writeControl(startCommand)
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun writeControl(command: ByteArray) {
+    private suspend fun performSingleRunStart() {
         val char = controlCharacteristic ?: return
-        gatt?.writeCharacteristic(
-            char,
-            command,
-            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        )
+        queueWriteCharacteristic(char, startCommand)
     }
 
     @SuppressLint("MissingPermission")
-    private fun readBatteryLevel() {
+    private suspend fun readBatteryLevelQueued() {
         val char = batteryCharacteristic ?: return
-        gatt?.readCharacteristic(char)
+        queueReadCharacteristic(char)
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun queueWriteCharacteristic(
+        char: BluetoothGattCharacteristic,
+        value: ByteArray
+    ): Boolean {
+        val g = gatt ?: return false
+        return gattQueue.submit {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                g.writeCharacteristic(char, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
+                    android.bluetooth.BluetoothStatusCodes.SUCCESS
+            } else {
+                @Suppress("DEPRECATION")
+                char.value = value
+                char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                @Suppress("DEPRECATION")
+                g.writeCharacteristic(char)
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun queueReadCharacteristic(char: BluetoothGattCharacteristic): Boolean {
+        val g = gatt ?: return false
+        return gattQueue.submit { g.readCharacteristic(char) }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun queueEnableNotifications(char: BluetoothGattCharacteristic): Boolean {
+        val g = gatt ?: return false
+        if (!g.setCharacteristicNotification(char, true)) return false
+        val descriptor = char.getDescriptor(UUID.fromString(CLIENT_CONFIG_UUID)) ?: return false
+        val value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        return gattQueue.submit {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                g.writeDescriptor(descriptor, value) ==
+                    android.bluetooth.BluetoothStatusCodes.SUCCESS
+            } else {
+                @Suppress("DEPRECATION")
+                descriptor.value = value
+                @Suppress("DEPRECATION")
+                g.writeDescriptor(descriptor)
+            }
+        }
     }
 
     private fun updateBatteryStatus(level: Int?) {
@@ -307,10 +349,15 @@ class BpClient(
                 _state.update { it.copy(isConnected = true, status = "Connected — discovering…") }
                 gatt.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                gattQueue.reset()
                 measurementCharacteristic = null
                 controlCharacteristic = null
                 batteryCharacteristic = null
                 lastBatteryState = BatteryState.UNKNOWN
+                // Close the platform GATT client so its internal resources are released.
+                // Without this, every power-cycle / out-of-range leaks a GATT object.
+                gatt.close()
+                this@BpClient.gatt = null
                 _state.update {
                     it.copy(
                         isConnected = false,
@@ -327,20 +374,22 @@ class BpClient(
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             val bp = gatt.getService(bpsService)
-            if (bp != null) {
-                setupBpCharacteristics(gatt, bp)
-            } else {
+            if (bp == null) {
                 _state.update { it.copy(status = "Blood Pressure service not found") }
+                return
             }
-
             val battery = gatt.getService(batteryService)
-            if (battery != null) {
-                setupBatteryCharacteristic(gatt, battery)
+            scope.launch {
+                setupBpCharacteristics(gatt, bp)
+                if (battery != null) {
+                    setupBatteryCharacteristic(gatt, battery)
+                }
             }
         }
 
         @SuppressLint("MissingPermission")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+            // Unsolicited notification — do not touch the op queue.
             when (characteristic.uuid) {
                 measurement -> {
                     val data = characteristic.value ?: return
@@ -358,11 +407,19 @@ class BpClient(
             characteristic: BluetoothGattCharacteristic,
             status: Int
         ) {
-            if (status != BluetoothGatt.GATT_SUCCESS) return
-            if (characteristic.uuid == batteryLevel) {
-                val data = characteristic.value ?: return
-                parseBatteryLevel(data)
+            val success = status == BluetoothGatt.GATT_SUCCESS
+            if (success && characteristic.uuid == batteryLevel) {
+                characteristic.value?.let { parseBatteryLevel(it) }
             }
+            gattQueue.completePending(success)
+        }
+
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            gattQueue.completePending(status == BluetoothGatt.GATT_SUCCESS)
         }
 
         override fun onDescriptorWrite(
@@ -370,45 +427,32 @@ class BpClient(
             descriptor: BluetoothGattDescriptor,
             status: Int
         ) {
-            if (status != BluetoothGatt.GATT_SUCCESS) {
+            val success = status == BluetoothGatt.GATT_SUCCESS
+            if (!success) {
                 _state.update { it.copy(status = "Notify error: $status") }
             }
+            gattQueue.completePending(success)
         }
     }
 
-    @SuppressLint("MissingPermission")
-    private fun setupBpCharacteristics(gatt: BluetoothGatt, service: BluetoothGattService) {
+    private suspend fun setupBpCharacteristics(gatt: BluetoothGatt, service: BluetoothGattService) {
         measurementCharacteristic = service.getCharacteristic(measurement)
         controlCharacteristic = service.getCharacteristic(control)
 
-        val notifyChar = measurementCharacteristic
-        if (notifyChar != null) {
-            gatt.setCharacteristicNotification(notifyChar, true)
-            val descriptor = notifyChar.getDescriptor(UUID.fromString(CLIENT_CONFIG_UUID))
-            descriptor?.let {
-                it.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                gatt.writeDescriptor(it)
-            }
-        }
+        measurementCharacteristic?.let { queueEnableNotifications(it) }
 
         val ready = measurementCharacteristic != null && controlCharacteristic != null
-        _state.update { it.copy(canMeasure = ready, status = if (ready) "Connected — ready" else "Discovering…") }
+        _state.update {
+            it.copy(canMeasure = ready, status = if (ready) "Connected — ready" else "Discovering…")
+        }
     }
 
-    @SuppressLint("MissingPermission")
-    private fun setupBatteryCharacteristic(gatt: BluetoothGatt, service: BluetoothGattService) {
+    private suspend fun setupBatteryCharacteristic(gatt: BluetoothGatt, service: BluetoothGattService) {
         val char = service.getCharacteristic(batteryLevel) ?: return
         batteryCharacteristic = char
-        gatt.readCharacteristic(char)
-
-        val supportsNotify = (char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
-        if (supportsNotify) {
-            gatt.setCharacteristicNotification(char, true)
-            val descriptor = char.getDescriptor(UUID.fromString(CLIENT_CONFIG_UUID))
-            descriptor?.let {
-                it.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                gatt.writeDescriptor(it)
-            }
+        queueReadCharacteristic(char)
+        if ((char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0) {
+            queueEnableNotifications(char)
         }
     }
 
@@ -474,7 +518,7 @@ class BpClient(
                     status = "Measurement invalid or incomplete — please try again. Check cuff fit and battery."
                 )
             }
-            readBatteryLevel()
+            scope.launch { readBatteryLevelQueued() }
             return
         }
 
@@ -500,7 +544,7 @@ class BpClient(
                         status = "Average session invalid — not all readings were valid. Please try again."
                     )
                 }
-                readBatteryLevel()
+                scope.launch { readBatteryLevelQueued() }
                 return
             }
 
@@ -517,7 +561,7 @@ class BpClient(
                         status = "Average reading invalid — please try again."
                     )
                 }
-                readBatteryLevel()
+                scope.launch { readBatteryLevelQueued() }
                 return
             }
 
@@ -529,7 +573,7 @@ class BpClient(
                 it.copy(lastReading = avg, status = "Connected — ready", isMeasuring = false)
             }
             onFinalReading?.invoke(avg)
-            readBatteryLevel()
+            scope.launch { readBatteryLevelQueued() }
             return
         }
 
@@ -537,7 +581,7 @@ class BpClient(
         hasFiredFinal = true
         _state.update { it.copy(status = "Connected — ready", isMeasuring = false) }
         onFinalReading?.invoke(reading)
-        readBatteryLevel()
+        scope.launch { readBatteryLevelQueued() }
     }
 
     private fun launchCountdownAndNextRun() {
