@@ -54,8 +54,8 @@ This project exists because Qardio, Inc. shut down its backend services and app 
 ```
 
 Requirements:
-- Android Studio / AGP 8.3+, Compose Material 3
-- Android SDK 34, Build Tools 34
+- Android Studio / AGP 9, Gradle 9, Kotlin 2.2, Compose Material 3
+- Android SDK 36 (minSdk 26)
 - Device with Bluetooth LE (QardioArm does not work in the emulator)
 
 Permissions requested at runtime:
