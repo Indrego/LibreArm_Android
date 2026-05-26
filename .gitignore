@@ -108,6 +108,9 @@ app/build/
 # carry no secret — standard android/androiddebugkey credentials.
 !debug.keystore
 
+# Privacy policy is generated into assets from the root PRIVACY.md at build time
+app/src/main/assets/privacy_policy.md
+
 # Swift Package Manager
 .swiftpm/
 .build/
