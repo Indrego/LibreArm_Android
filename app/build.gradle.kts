@@ -93,3 +93,13 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
+// Bundle the canonical privacy policy so the in-app viewer can show it offline
+// (the app holds no INTERNET permission). PRIVACY.md at the repo root stays the
+// single source; this copies it into assets at build time.
+val copyPrivacyPolicy by tasks.registering(Copy::class) {
+    from(rootProject.file("PRIVACY.md"))
+    into(layout.projectDirectory.dir("src/main/assets"))
+    rename { "privacy_policy.md" }
+}
+tasks.named("preBuild") { dependsOn(copyPrivacyPolicy) }
