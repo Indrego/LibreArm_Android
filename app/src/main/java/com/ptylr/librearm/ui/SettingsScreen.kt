@@ -8,8 +8,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,25 +22,24 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.ptylr.librearm.R
 import com.ptylr.librearm.health.HealthConnectManager
-import com.ptylr.librearm.model.MeasurementMode
-import kotlin.math.abs
+
+private val READINGS_OPTIONS = listOf(1, 2, 3)
+private val DELAY_OPTIONS = listOf(15, 30, 45, 60)
 
 @Composable
 fun SettingsScreen(
-    isMeasuring: Boolean,
-    measurementMode: MeasurementMode,
+    readingsCount: Int,
     delaySeconds: Int,
+    isMeasuring: Boolean,
     autoSaveToHealth: Boolean,
     healthAuthorized: Boolean,
     healthAvailable: HealthConnectManager.Availability,
     healthRequestInFlight: Boolean,
-    onMeasurementModeChange: (MeasurementMode) -> Unit,
+    onReadingsCountChange: (Int) -> Unit,
     onDelayChange: (Int) -> Unit,
-    onDelayChangeFinished: (Int) -> Unit,
     onAutoSaveChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val averageMode = measurementMode == MeasurementMode.AVERAGE3
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -46,43 +48,17 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         Section(title = stringResource(R.string.settings_section_measurement)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(stringResource(R.string.setting_average_3))
-                Switch(
-                    checked = averageMode,
-                    onCheckedChange = {
-                        onMeasurementModeChange(if (it) MeasurementMode.AVERAGE3 else MeasurementMode.SINGLE)
-                    },
-                    enabled = !isMeasuring
-                )
-            }
+            ReadingsCountSelector(
+                readingsCount = readingsCount,
+                enabled = !isMeasuring,
+                onReadingsCountChange = onReadingsCountChange
+            )
 
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(stringResource(R.string.setting_delay_between_readings))
-                    Text(
-                        stringResource(R.string.delay_format, delaySeconds),
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-                Slider(
-                    value = delaySeconds.toFloat(),
-                    onValueChange = { onDelayChange(it.toInt()) },
-                    valueRange = 15f..60f,
-                    steps = 2,
-                    enabled = !isMeasuring && averageMode,
-                    onValueChangeFinished = {
-                        val options = listOf(15, 30, 45, 60)
-                        val closest = options.minByOrNull { abs(it - delaySeconds) } ?: 30
-                        onDelayChangeFinished(closest)
-                    }
+            if (readingsCount > 1) {
+                DelaySelector(
+                    delaySeconds = delaySeconds,
+                    enabled = !isMeasuring,
+                    onDelayChange = onDelayChange
                 )
             }
         }
@@ -118,12 +94,77 @@ fun SettingsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReadingsCountSelector(
+    readingsCount: Int,
+    enabled: Boolean,
+    onReadingsCountChange: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(stringResource(R.string.setting_readings_per_measurement))
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            READINGS_OPTIONS.forEachIndexed { index, value ->
+                SegmentedButton(
+                    selected = readingsCount == value,
+                    onClick = { onReadingsCountChange(value) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = READINGS_OPTIONS.size
+                    ),
+                    enabled = enabled
+                ) {
+                    Text(stringResource(R.string.count_format, value))
+                }
+            }
+        }
+        Text(
+            text = stringResource(R.string.setting_readings_per_measurement_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DelaySelector(
+    delaySeconds: Int,
+    enabled: Boolean,
+    onDelayChange: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(stringResource(R.string.setting_delay_between_readings))
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            DELAY_OPTIONS.forEachIndexed { index, value ->
+                SegmentedButton(
+                    selected = delaySeconds == value,
+                    onClick = { onDelayChange(value) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = DELAY_OPTIONS.size
+                    ),
+                    enabled = enabled
+                ) {
+                    Text(stringResource(R.string.delay_format, value))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            title,
-            style = MaterialTheme.typography.titleSmall,
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary
         )
         content()

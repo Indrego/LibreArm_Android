@@ -1,5 +1,6 @@
 package com.ptylr.librearm.ble
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -15,13 +16,14 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelUuid
+import androidx.core.content.ContextCompat
 import com.ptylr.librearm.model.BatteryStatus
 import com.ptylr.librearm.model.BpReading
 import com.ptylr.librearm.model.BpState
 import com.ptylr.librearm.model.BpStatus
-import com.ptylr.librearm.model.MeasurementMode
 import com.ptylr.librearm.model.levelOrNull
 import com.ptylr.librearm.notifications.BatteryNotifier
 import java.util.UUID
@@ -35,10 +37,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * BLE client for QardioArm blood pressure cuff.
- * Mirrors the iOS BPClient behaviors: connection management, session debouncing,
- * average-of-3 mode with adjustable delay, battery monitoring with low/critical
- * thresholds, strict reading validation, and final reading callback.
+ * BLE client for QardioArm blood pressure cuff. Connection management,
+ * session debouncing, configurable readings count (1, 2, or 3) with
+ * adjustable inter-run delay,
+ * battery monitoring with low/critical thresholds, strict reading
+ * validation, and final reading callback.
  */
 class BpClient(
     private val context: Context,
@@ -66,7 +69,8 @@ class BpClient(
 
     private var sessionActive = false
     private var hasFiredFinal = false
-    private var remainingRuns = 0
+    /** 1-based index of the current run within the session (e.g. 2 of 3). */
+    private var currentRunIndex = 0
     private val accumulatedReadings = mutableListOf<BpReading>()
 
     private var lastBatteryStage: BatteryStage = BatteryStage.UNKNOWN
@@ -83,8 +87,8 @@ class BpClient(
     private val startCommand = byteArrayOf(0xF1.toByte(), 0x01)
     private val cancelCommand = byteArrayOf(0xF1.toByte(), 0x02)
 
-    fun setMeasurementMode(mode: MeasurementMode) {
-        _state.update { it.copy(measurementMode = mode) }
+    fun setReadingsCount(count: Int) {
+        _state.update { it.copy(readingsCount = count.coerceIn(1, 3)) }
     }
 
     fun setDelayBetweenRuns(seconds: Int) {
@@ -93,7 +97,7 @@ class BpClient(
 
     @SuppressLint("MissingPermission")
     fun startConnect(timeoutSeconds: Long = 30) {
-        if (!BlePermissions.areGranted(context)) {
+        if (!hasBlePermission()) {
             _state.update { it.copy(status = BpStatus.BluetoothPermissionRequired) }
             return
         }
@@ -141,13 +145,18 @@ class BpClient(
         accumulatedReadings.clear()
         finalizeJob?.cancel()
         countdownJob?.cancel()
+        currentRunIndex = 1
 
-        if (_state.value.measurementMode == MeasurementMode.AVERAGE3) {
-            remainingRuns = 3
-            _state.update { it.copy(status = BpStatus.MeasuringRun(current = 1, total = 3), isMeasuring = true) }
-        } else {
-            remainingRuns = 0
-            _state.update { it.copy(status = BpStatus.Measuring, isMeasuring = true) }
+        val total = _state.value.readingsCount
+        _state.update {
+            it.copy(
+                status = if (total > 1) {
+                    BpStatus.MeasuringRun(current = 1, total = total)
+                } else {
+                    BpStatus.Measuring
+                },
+                isMeasuring = true
+            )
         }
 
         scope.launch {
@@ -162,12 +171,7 @@ class BpClient(
         scope.launch {
             controlCharacteristic?.let { queueWriteCharacteristic(it, cancelCommand) }
         }
-        remainingRuns = 0
-        accumulatedReadings.clear()
-        sessionActive = false
-        hasFiredFinal = true
-        finalizeJob?.cancel()
-        countdownJob?.cancel()
+        resetSession()
         _state.update { it.copy(status = BpStatus.Ready, isMeasuring = false) }
     }
 
@@ -182,14 +186,29 @@ class BpClient(
         gatt = null
     }
 
-    private fun resetSessionForScan() {
-        stopScan()
-        hasFiredFinal = false
+    private fun hasBlePermission(): Boolean {
+        val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        return required.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun resetSession() {
         sessionActive = false
-        remainingRuns = 0
+        hasFiredFinal = true
+        currentRunIndex = 0
         accumulatedReadings.clear()
         finalizeJob?.cancel()
         countdownJob?.cancel()
+    }
+
+    private fun resetSessionForScan() {
+        stopScan()
+        resetSession()
         connectTimeoutJob?.cancel()
         _state.update {
             it.copy(
@@ -484,43 +503,38 @@ class BpClient(
         val reading = _state.value.lastReading ?: return
         if (!sessionActive || hasFiredFinal || reading.dia <= 0) return
 
+        val total = _state.value.readingsCount
+
         if (!BpValidation.isValid(reading)) {
-            failSession(BpStatus.MeasurementInvalid)
+            failSession(if (total > 1) BpStatus.AverageSessionInvalid else BpStatus.MeasurementInvalid)
             return
         }
 
-        if (_state.value.measurementMode == MeasurementMode.AVERAGE3) {
-            accumulatedReadings.add(reading)
+        accumulatedReadings.add(reading)
 
-            if (remainingRuns > 1) {
-                remainingRuns -= 1
-                launchCountdownAndNextRun()
-                return
-            }
+        if (currentRunIndex < total) {
+            currentRunIndex += 1
+            launchCountdownAndNextRun(justCompleted = currentRunIndex - 1, nextRun = currentRunIndex)
+            return
+        }
 
-            if (accumulatedReadings.size < 3) {
-                failSession(BpStatus.AverageSessionInvalid)
-                return
-            }
-
+        // All runs collected — average if needed, save, done.
+        val finalReading = if (accumulatedReadings.size > 1) {
             val avg = average(accumulatedReadings)
             if (!BpValidation.isValid(avg)) {
                 failSession(BpStatus.AverageReadingInvalid)
                 return
             }
-
-            completeSession(avg)
-            return
+            avg
+        } else {
+            reading
         }
 
-        completeSession(reading)
+        completeSession(finalReading)
     }
 
     private fun failSession(status: BpStatus) {
-        sessionActive = false
-        hasFiredFinal = true
-        remainingRuns = 0
-        accumulatedReadings.clear()
+        resetSession()
         _state.update {
             it.copy(lastReading = null, isMeasuring = false, status = status)
         }
@@ -528,10 +542,7 @@ class BpClient(
     }
 
     private fun completeSession(reading: BpReading) {
-        sessionActive = false
-        hasFiredFinal = true
-        remainingRuns = 0
-        accumulatedReadings.clear()
+        resetSession()
         _state.update {
             it.copy(lastReading = reading, status = BpStatus.Ready, isMeasuring = false)
         }
@@ -539,19 +550,18 @@ class BpClient(
         scope.launch { readBatteryLevelQueued() }
     }
 
-    private fun launchCountdownAndNextRun() {
+    private fun launchCountdownAndNextRun(justCompleted: Int, nextRun: Int) {
         countdownJob?.cancel()
         var countdown = _state.value.delayBetweenRunsSeconds
-        val completedRun = 3 - remainingRuns
-        val nextRun = completedRun + 1
+        val total = _state.value.readingsCount
 
         fun postCountdown() {
             _state.update {
                 it.copy(
                     status = BpStatus.Countdown(
                         secondsRemaining = countdown,
-                        justCompletedRun = completedRun,
-                        total = 3
+                        justCompletedRun = justCompleted,
+                        total = total
                     ),
                     isMeasuring = true
                 )
@@ -566,7 +576,10 @@ class BpClient(
                 postCountdown()
             }
             _state.update {
-                it.copy(status = BpStatus.MeasuringRun(current = nextRun, total = 3), isMeasuring = true)
+                it.copy(
+                    status = BpStatus.MeasuringRun(current = nextRun, total = total),
+                    isMeasuring = true
+                )
             }
             performSingleRunStart()
         }

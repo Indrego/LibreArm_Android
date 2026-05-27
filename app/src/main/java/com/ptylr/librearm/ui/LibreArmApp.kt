@@ -1,6 +1,7 @@
 package com.ptylr.librearm.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
@@ -42,7 +43,6 @@ import com.ptylr.librearm.BpViewModel
 import com.ptylr.librearm.R
 import com.ptylr.librearm.ble.BlePermissions
 import com.ptylr.librearm.health.HealthConnectManager
-import com.ptylr.librearm.model.MeasurementMode
 import com.ptylr.librearm.prefs.Preferences
 import java.time.Instant
 import kotlinx.coroutines.launch
@@ -105,9 +105,7 @@ fun LibreArmApp(
         }
         healthGranted = healthManager.hasWritePermissions()
         healthAvailable = healthManager.availability()
-        if (preferences.averageMode) {
-            viewModel.setMeasurementMode(MeasurementMode.AVERAGE3)
-        }
+        viewModel.setReadingsCount(preferences.readingsCount)
         viewModel.setDelayBetweenRuns(preferences.delayBetweenRunsSeconds)
         if (!healthGranted && autoSaveToHealth) {
             autoSaveToHealth = false
@@ -197,21 +195,18 @@ fun LibreArmApp(
             }
             composable(TopLevel.Settings.route) {
                 SettingsScreen(
-                    isMeasuring = state.isMeasuring,
-                    measurementMode = state.measurementMode,
+                    readingsCount = state.readingsCount,
                     delaySeconds = state.delayBetweenRunsSeconds,
+                    isMeasuring = state.isMeasuring,
                     autoSaveToHealth = autoSaveToHealth,
                     healthAuthorized = healthGranted,
                     healthAvailable = healthAvailable,
                     healthRequestInFlight = healthRequestInFlight,
-                    onMeasurementModeChange = { mode ->
-                        viewModel.setMeasurementMode(mode)
-                        preferences.averageMode = mode == MeasurementMode.AVERAGE3
+                    onReadingsCountChange = { count ->
+                        viewModel.setReadingsCount(count)
+                        preferences.readingsCount = count
                     },
                     onDelayChange = { seconds ->
-                        viewModel.setDelayBetweenRuns(seconds)
-                    },
-                    onDelayChangeFinished = { seconds ->
                         viewModel.setDelayBetweenRuns(seconds)
                         preferences.delayBetweenRunsSeconds = seconds
                     },
@@ -248,3 +243,4 @@ fun LibreArmApp(
         }
     }
 }
+

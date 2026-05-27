@@ -1,7 +1,5 @@
 package com.ptylr.librearm.model
 
-enum class MeasurementMode { SINGLE, AVERAGE3 }
-
 data class BpReading(
     val sys: Double,
     val dia: Double,
@@ -11,7 +9,7 @@ data class BpReading(
 
 /**
  * Structured status of the BLE/measurement state. UI maps each case to a localized string
- * (see com.ptylr.librearm.ui.statusText) so the BLE layer stays free of resource lookups.
+ * (see [com.ptylr.librearm.ui.text] in Status.kt) so the BLE layer stays free of resource lookups.
  */
 sealed class BpStatus {
     data object Searching : BpStatus()
@@ -54,7 +52,7 @@ data class BpState(
     val isConnected: Boolean = false,
     val canMeasure: Boolean = false,
     val isMeasuring: Boolean = false,
-    val measurementMode: MeasurementMode = MeasurementMode.SINGLE,
+    val readingsCount: Int = 1,
     val delayBetweenRunsSeconds: Int = 30,
     val battery: BatteryStatus = BatteryStatus.Unavailable
 )
