@@ -6,9 +6,17 @@ This project exists because Qardio, Inc. shut down its backend services and app 
 
 ---
 
-## ✨ Features (v1.5.0)
+## ✨ Android port enhancements
 
-### New in v1.5.0
+Features the Android port adds beyond the iOS app's feature set:
+
+- **Bottom navigation** — Settings and About destinations alongside the measurement screen
+
+## 📋 Inherited from iOS
+
+The Android port mirrors the iOS LibreArm feature set; the version numbers below trace that **iOS** lineage (the port's own first Android release is v1.5.0).
+
+### v1.5.0
 
 - **Always-Visible Hypertension Graph**: blood pressure graph permanently displayed inside the reading card
   - Color-coded zones: Low (cyan), Normal (green), Prehypertension (orange), Stage 1 (pink), Stage 2 (red)
@@ -24,7 +32,7 @@ This project exists because Qardio, Inc. shut down its backend services and app 
   - Delay slider always visible (disabled when not in Average mode)
   - Launcher-icon image removed from the main view
 
-### New in v1.4.0
+### v1.4.0
 
 - **Battery Level Display**: real-time battery monitoring using the standard BLE Battery Service (0x180F / 0x2A19)
   - Battery percentage shown under the connection status
@@ -36,7 +44,7 @@ This project exists because Qardio, Inc. shut down its backend services and app 
 - **Average Mode hardening**: requires all 3 readings to be valid; the averaged result is re-validated before being returned
 - **Automatic Battery Checks**: battery level is read on connect, before measurements, and after completion
 
-### Earlier features (v1.3.0 and earlier)
+### v1.3.0 and earlier
 
 - Connects to QardioArm over BLE (no Qardio cloud or accounts required)
 - Connection management with retry button + 30s connection timeout

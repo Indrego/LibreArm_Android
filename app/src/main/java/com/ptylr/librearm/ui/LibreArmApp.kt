@@ -1,12 +1,23 @@
 package com.ptylr.librearm.ui
 
 import android.Manifest
-import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -16,9 +27,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import com.ptylr.librearm.BpViewModel
 import com.ptylr.librearm.R
 import com.ptylr.librearm.ble.BlePermissions
@@ -28,6 +47,17 @@ import com.ptylr.librearm.prefs.Preferences
 import java.time.Instant
 import kotlinx.coroutines.launch
 
+private enum class TopLevel(
+    val route: String,
+    val labelRes: Int,
+    val icon: ImageVector
+) {
+    Home("home", R.string.nav_home, Icons.Default.MonitorHeart),
+    Settings("settings", R.string.nav_settings, Icons.Default.Settings),
+    About("about", R.string.nav_about, Icons.Default.Info)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibreArmApp(
     viewModel: BpViewModel,
@@ -112,51 +142,109 @@ fun LibreArmApp(
 
     KeepScreenOn(enabled = state.isMeasuring)
 
-    MainScreen(
-        state = state,
-        autoSaveToHealth = autoSaveToHealth,
-        healthAuthorized = healthGranted,
-        healthAvailable = healthAvailable,
-        healthRequestInFlight = healthRequestInFlight,
-        onAutoSaveChange = { enabled ->
-            if (!enabled) {
-                autoSaveToHealth = false
-                preferences.autoSaveToHealth = false
-                return@MainScreen
-            }
-            if (healthAvailable != HealthConnectManager.Availability.Available) {
-                autoSaveToHealth = false
-                preferences.autoSaveToHealth = false
-                onLaunchInstallIntent()
-                return@MainScreen
-            }
-            healthRequestInFlight = true
-            scope.launch {
-                val writeGranted = healthManager.hasWritePermissions()
-                healthGranted = writeGranted
-                if (writeGranted) {
-                    autoSaveToHealth = true
-                    preferences.autoSaveToHealth = true
-                    healthRequestInFlight = false
-                } else {
-                    healthPermissionLauncher.launch(healthManager.permissions)
+    val navController = rememberNavController()
+    val currentBackStack by navController.currentBackStackEntryAsState()
+    val currentRoute = currentBackStack?.destination?.route
+    val currentDestination = TopLevel.entries.firstOrNull { it.route == currentRoute } ?: TopLevel.Home
+
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(stringResource(currentDestination.labelRes)) }
+            )
+        },
+        bottomBar = {
+            NavigationBar {
+                TopLevel.entries.forEach { dest ->
+                    val selected = currentBackStack?.destination?.hierarchy
+                        ?.any { it.route == dest.route } == true
+                    NavigationBarItem(
+                        selected = selected,
+                        onClick = {
+                            navController.navigate(dest.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = dest.icon,
+                                contentDescription = stringResource(dest.labelRes)
+                            )
+                        },
+                        label = { Text(stringResource(dest.labelRes)) }
+                    )
                 }
             }
-        },
-        onStartStop = {
-            if (state.isMeasuring) viewModel.cancelMeasurement() else viewModel.startMeasurement()
-        },
-        onRetryConnect = { viewModel.startConnect() },
-        onMeasurementModeChange = { mode ->
-            viewModel.setMeasurementMode(mode)
-            preferences.averageMode = mode == MeasurementMode.AVERAGE3
-        },
-        onDelayChange = { viewModel.setDelayBetweenRuns(it) },
-        onDelayChangeFinished = { snapped ->
-            viewModel.setDelayBetweenRuns(snapped)
-            preferences.delayBetweenRunsSeconds = snapped
-        },
-        onOpenLink = onOpenUrl
-    )
+        }
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = TopLevel.Home.route,
+            modifier = Modifier.padding(innerPadding)
+        ) {
+            composable(TopLevel.Home.route) {
+                MainScreen(
+                    state = state,
+                    onStartStop = {
+                        if (state.isMeasuring) viewModel.cancelMeasurement() else viewModel.startMeasurement()
+                    },
+                    onRetryConnect = { viewModel.startConnect() }
+                )
+            }
+            composable(TopLevel.Settings.route) {
+                SettingsScreen(
+                    isMeasuring = state.isMeasuring,
+                    measurementMode = state.measurementMode,
+                    delaySeconds = state.delayBetweenRunsSeconds,
+                    autoSaveToHealth = autoSaveToHealth,
+                    healthAuthorized = healthGranted,
+                    healthAvailable = healthAvailable,
+                    healthRequestInFlight = healthRequestInFlight,
+                    onMeasurementModeChange = { mode ->
+                        viewModel.setMeasurementMode(mode)
+                        preferences.averageMode = mode == MeasurementMode.AVERAGE3
+                    },
+                    onDelayChange = { seconds ->
+                        viewModel.setDelayBetweenRuns(seconds)
+                    },
+                    onDelayChangeFinished = { seconds ->
+                        viewModel.setDelayBetweenRuns(seconds)
+                        preferences.delayBetweenRunsSeconds = seconds
+                    },
+                    onAutoSaveChange = { enabled ->
+                        if (!enabled) {
+                            autoSaveToHealth = false
+                            preferences.autoSaveToHealth = false
+                            return@SettingsScreen
+                        }
+                        if (healthAvailable != HealthConnectManager.Availability.Available) {
+                            autoSaveToHealth = false
+                            preferences.autoSaveToHealth = false
+                            onLaunchInstallIntent()
+                            return@SettingsScreen
+                        }
+                        healthRequestInFlight = true
+                        scope.launch {
+                            val writeGranted = healthManager.hasWritePermissions()
+                            healthGranted = writeGranted
+                            if (writeGranted) {
+                                autoSaveToHealth = true
+                                preferences.autoSaveToHealth = true
+                                healthRequestInFlight = false
+                            } else {
+                                healthPermissionLauncher.launch(healthManager.permissions)
+                            }
+                        }
+                    }
+                )
+            }
+            composable(TopLevel.About.route) {
+                AboutScreen(onOpenLink = onOpenUrl)
+            }
+        }
+    }
 }
-
