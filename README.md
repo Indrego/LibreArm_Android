@@ -11,6 +11,7 @@ This project exists because Qardio, Inc. shut down its backend services and app 
 Features the Android port adds beyond the iOS app's feature set:
 
 - **Bottom navigation** — Settings and About destinations alongside the measurement screen
+- **Configurable readings** — take 1, 2, or 3 readings per measurement (averaged when more than one), selectable in Settings
 
 ## 📋 Inherited from iOS
 

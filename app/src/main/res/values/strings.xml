@@ -17,9 +17,11 @@
 
     <!-- Settings -->
     <string name="setting_save_to_health">Save to Health Connect</string>
-    <string name="setting_average_3">Average (3 readings)</string>
+    <string name="setting_readings_per_measurement">Readings per measurement</string>
+    <string name="setting_readings_per_measurement_hint">When more than one is selected, the readings are averaged.</string>
     <string name="setting_delay_between_readings">Delay between readings (seconds)</string>
     <string name="delay_format">%1$ds</string>
+    <string name="count_format">%1$d</string>
 
     <!-- Health Connect availability hints -->
     <string name="hc_toggle_to_request">Toggle to request access</string>
