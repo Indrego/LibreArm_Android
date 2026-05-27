@@ -59,7 +59,7 @@ class BatteryNotifier(private val context: Context) {
 
     private fun isAppForegrounded(): Boolean {
         val state = ProcessLifecycleOwner.get().lifecycle.currentState
-        return state.isAtLeast(Lifecycle.State.STARTED)
+        return state.isAtLeast(Lifecycle.State.RESUMED)
     }
 
     private fun hasPostPermission(): Boolean {
