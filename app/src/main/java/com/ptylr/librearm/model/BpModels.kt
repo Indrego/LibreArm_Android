@@ -9,14 +9,52 @@ data class BpReading(
     val hr: Double? = null
 )
 
+/**
+ * Structured status of the BLE/measurement state. UI maps each case to a localized string
+ * (see com.ptylr.librearm.ui.statusText) so the BLE layer stays free of resource lookups.
+ */
+sealed class BpStatus {
+    data object Searching : BpStatus()
+    data object Connecting : BpStatus()
+    data object Discovering : BpStatus()
+    data object Ready : BpStatus()
+    data object Disconnected : BpStatus()
+    data object BluetoothUnavailable : BpStatus()
+    data object BluetoothPermissionRequired : BpStatus()
+    data object NotConnectedTimeout : BpStatus()
+    data object BloodPressureServiceNotFound : BpStatus()
+    data object Measuring : BpStatus()
+    data class MeasuringRun(val current: Int, val total: Int) : BpStatus()
+    data class Countdown(val secondsRemaining: Int, val justCompletedRun: Int, val total: Int) : BpStatus()
+    data class BatteryCriticalBlocked(val level: Int) : BpStatus()
+    data object MeasurementInvalid : BpStatus()
+    data object AverageSessionInvalid : BpStatus()
+    data object AverageReadingInvalid : BpStatus()
+    data class NotifyError(val gattStatus: Int) : BpStatus()
+}
+
+sealed class BatteryStatus {
+    data object Unavailable : BatteryStatus()
+    data class Normal(val level: Int) : BatteryStatus()
+    data class Low(val level: Int) : BatteryStatus()
+    data class Critical(val level: Int) : BatteryStatus()
+}
+
+val BatteryStatus.levelOrNull: Int?
+    get() = when (this) {
+        BatteryStatus.Unavailable -> null
+        is BatteryStatus.Normal -> level
+        is BatteryStatus.Low -> level
+        is BatteryStatus.Critical -> level
+    }
+
 data class BpState(
-    val status: String = "Searching for device…",
+    val status: BpStatus = BpStatus.Searching,
     val lastReading: BpReading? = null,
     val isConnected: Boolean = false,
     val canMeasure: Boolean = false,
     val isMeasuring: Boolean = false,
     val measurementMode: MeasurementMode = MeasurementMode.SINGLE,
     val delayBetweenRunsSeconds: Int = 30,
-    val batteryLevelPct: Int? = null,
-    val batteryStatusLine: String = "Battery: unavailable"
+    val battery: BatteryStatus = BatteryStatus.Unavailable
 )

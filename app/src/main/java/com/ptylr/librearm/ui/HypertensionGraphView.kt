@@ -4,6 +4,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -11,8 +12,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ptylr.librearm.R
 
 /**
  * Compose port of the iOS HypertensionGraphView. Draws the five color-coded zones
@@ -26,6 +29,13 @@ fun HypertensionGraphView(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
+    val zoneStage2 = stringResource(R.string.graph_zone_stage2)
+    val zoneStage1 = stringResource(R.string.graph_zone_stage1)
+    val zonePrehypertension = stringResource(R.string.graph_zone_prehypertension)
+    val zoneNormal = stringResource(R.string.graph_zone_normal)
+    val zoneLow = stringResource(R.string.graph_zone_low)
+    val xAxisTitle = stringResource(R.string.graph_diastolic)
+    val yAxisTitle = stringResource(R.string.graph_systolic)
     val zoneTextPx = with(density) { 13.sp.toPx() }
     val axisTextPx = with(density) { 12.sp.toPx() }
     val labelLeftPadPx = with(density) { 12.dp.toPx() }
@@ -39,6 +49,21 @@ fun HypertensionGraphView(
     val innerRPx = with(density) { 9.dp.toPx() }
     val shadowOffsetPx = with(density) { 2.dp.toPx() }
     val shadowGrowPx = with(density) { 1.dp.toPx() }
+    val zoneLabelPaint = remember(zoneTextPx) {
+        Paint().apply {
+            color = android.graphics.Color.BLACK
+            isAntiAlias = true
+            textSize = zoneTextPx
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+    }
+    val axisPaint = remember(axisTextPx) {
+        Paint().apply {
+            color = android.graphics.Color.DKGRAY
+            isAntiAlias = true
+            textSize = axisTextPx
+        }
+    }
 
     Canvas(modifier = modifier) {
         val w = size.width - gutterRightPx
@@ -156,23 +181,6 @@ fun HypertensionGraphView(
             color = Color(0xFF66D9D9)
         )
 
-        val zoneLabelPaint = Paint().apply {
-            color = android.graphics.Color.BLACK
-            isAntiAlias = true
-            textSize = zoneTextPx
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        }
-        val axisPaint = Paint().apply {
-            color = android.graphics.Color.DKGRAY
-            isAntiAlias = true
-            textSize = axisTextPx
-        }
-        val axisTitlePaint = Paint().apply {
-            color = android.graphics.Color.DKGRAY
-            isAntiAlias = true
-            textSize = axisTextPx
-        }
-
         val canvas = drawContext.canvas.nativeCanvas
 
         fun drawZoneLabel(text: String, atSys: Double) {
@@ -180,11 +188,11 @@ fun HypertensionGraphView(
             canvas.drawText(text, labelLeftPadPx, baseline, zoneLabelPaint)
         }
 
-        drawZoneLabel("High: Stage 2 Hypertension", 170.0)
-        drawZoneLabel("High: Stage 1 Hypertension", 150.0)
-        drawZoneLabel("Prehypertension", 130.0)
-        drawZoneLabel("Normal", 105.0)
-        drawZoneLabel("Low", 65.0)
+        drawZoneLabel(zoneStage2, 170.0)
+        drawZoneLabel(zoneStage1, 150.0)
+        drawZoneLabel(zonePrehypertension, 130.0)
+        drawZoneLabel(zoneNormal, 105.0)
+        drawZoneLabel(zoneLow, 65.0)
 
         // Diastolic axis labels (bottom)
         listOf(40, 60, 80, 90, 100, 120).forEach { dia ->
@@ -197,12 +205,11 @@ fun HypertensionGraphView(
                 axisPaint
             )
         }
-        val xTitle = "Diastolic (mmHg)"
         canvas.drawText(
-            xTitle,
-            (w - axisTitlePaint.measureText(xTitle)) / 2f,
+            xAxisTitle,
+            (w - axisPaint.measureText(xAxisTitle)) / 2f,
             h + xTitleGapPx,
-            axisTitlePaint
+            axisPaint
         )
 
         // Systolic axis labels (right)
@@ -218,14 +225,13 @@ fun HypertensionGraphView(
 
         // Rotated systolic axis title
         canvas.save()
-        val yTitle = "Systolic (mmHg)"
-        val yTitleWidth = axisTitlePaint.measureText(yTitle)
+        val yTitleWidth = axisPaint.measureText(yAxisTitle)
         canvas.rotate(-90f, w + yTitleGapPx, h / 2f)
         canvas.drawText(
-            yTitle,
+            yAxisTitle,
             w + yTitleGapPx - yTitleWidth / 2f,
-            h / 2f + axisTitlePaint.textSize / 3f,
-            axisTitlePaint
+            h / 2f + axisPaint.textSize / 3f,
+            axisPaint
         )
         canvas.restore()
 
