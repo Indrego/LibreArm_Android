@@ -22,9 +22,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.ptylr.librearm.R
 import com.ptylr.librearm.health.HealthConnectManager
+import com.ptylr.librearm.model.ThemeMode
 
 private val READINGS_OPTIONS = listOf(1, 2, 3)
 private val DELAY_OPTIONS = listOf(15, 30, 45, 60)
+private val THEME_OPTIONS = listOf(ThemeMode.Auto, ThemeMode.Light, ThemeMode.Dark)
 
 @Composable
 fun SettingsScreen(
@@ -35,6 +37,8 @@ fun SettingsScreen(
     healthAuthorized: Boolean,
     healthAvailable: HealthConnectManager.Availability,
     healthRequestInFlight: Boolean,
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
     onReadingsCountChange: (Int) -> Unit,
     onDelayChange: (Int) -> Unit,
     onAutoSaveChange: (Boolean) -> Unit,
@@ -61,6 +65,13 @@ fun SettingsScreen(
                     onDelayChange = onDelayChange
                 )
             }
+        }
+
+        Section(title = stringResource(R.string.settings_section_appearance)) {
+            ThemeSelector(
+                themeMode = themeMode,
+                onThemeModeChange = onThemeModeChange
+            )
         }
 
         Section(title = stringResource(R.string.settings_section_storage)) {
@@ -115,7 +126,8 @@ private fun ReadingsCountSelector(
                         index = index,
                         count = READINGS_OPTIONS.size
                     ),
-                    enabled = enabled
+                    enabled = enabled,
+                    icon = {}
                 ) {
                     Text(stringResource(R.string.count_format, value))
                 }
@@ -150,9 +162,47 @@ private fun DelaySelector(
                         index = index,
                         count = DELAY_OPTIONS.size
                     ),
-                    enabled = enabled
+                    enabled = enabled,
+                    icon = {}
                 ) {
                     Text(stringResource(R.string.delay_format, value))
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThemeSelector(
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(stringResource(R.string.setting_theme))
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            THEME_OPTIONS.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = themeMode == mode,
+                    onClick = { onThemeModeChange(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = THEME_OPTIONS.size
+                    ),
+                    icon = {}
+                ) {
+                    Text(
+                        stringResource(
+                            when (mode) {
+                                ThemeMode.Auto -> R.string.theme_auto
+                                ThemeMode.Light -> R.string.theme_light
+                                ThemeMode.Dark -> R.string.theme_dark
+                            }
+                        )
+                    )
                 }
             }
         }
