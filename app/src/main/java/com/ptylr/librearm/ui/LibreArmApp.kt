@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -19,6 +20,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -43,6 +45,7 @@ import com.ptylr.librearm.BpViewModel
 import com.ptylr.librearm.R
 import com.ptylr.librearm.ble.BlePermissions
 import com.ptylr.librearm.health.HealthConnectManager
+import com.ptylr.librearm.model.BpStatus
 import com.ptylr.librearm.prefs.Preferences
 import java.time.Instant
 import kotlinx.coroutines.launch
@@ -139,6 +142,36 @@ fun LibreArmApp(
     }
 
     KeepScreenOn(enabled = state.isMeasuring)
+
+    (state.status as? BpStatus.RetryPrompt)?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { /* require explicit choice */ },
+            title = { Text(stringResource(R.string.retry_dialog_title)) },
+            text = {
+                Text(
+                    if (prompt.totalRuns > 1) {
+                        stringResource(
+                            R.string.retry_dialog_message_multi,
+                            prompt.failedRun,
+                            prompt.totalRuns
+                        )
+                    } else {
+                        stringResource(R.string.retry_dialog_message_single)
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.retryFailedReading() }) {
+                    Text(stringResource(R.string.retry_dialog_retry))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.cancelMeasurement() }) {
+                    Text(stringResource(R.string.retry_dialog_cancel))
+                }
+            }
+        )
+    }
 
     val navController = rememberNavController()
     val currentBackStack by navController.currentBackStackEntryAsState()
