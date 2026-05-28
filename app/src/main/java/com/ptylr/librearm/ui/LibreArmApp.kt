@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Settings
@@ -30,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -46,6 +48,7 @@ import com.ptylr.librearm.R
 import com.ptylr.librearm.ble.BlePermissions
 import com.ptylr.librearm.health.HealthConnectManager
 import com.ptylr.librearm.model.BpStatus
+import com.ptylr.librearm.model.HistoricalReading
 import com.ptylr.librearm.model.ThemeMode
 import com.ptylr.librearm.prefs.Preferences
 import java.time.Instant
@@ -57,6 +60,7 @@ private enum class TopLevel(
     val icon: ImageVector
 ) {
     Home("home", R.string.nav_home, Icons.Default.MonitorHeart),
+    History("history", R.string.nav_history, Icons.Default.History),
     Settings("settings", R.string.nav_settings, Icons.Default.Settings),
     About("about", R.string.nav_about, Icons.Default.Info)
 }
@@ -80,8 +84,11 @@ fun LibreArmApp(
 
     var autoSaveToHealth by rememberSaveable { mutableStateOf(preferences.autoSaveToHealth) }
     var healthGranted by remember { mutableStateOf(false) }
+    var healthReadGranted by remember { mutableStateOf(false) }
+    var healthReadDeniedAfterRequest by remember { mutableStateOf(false) }
     var healthAvailable by remember { mutableStateOf(HealthConnectManager.Availability.Unknown) }
     var healthRequestInFlight by remember { mutableStateOf(false) }
+    var history by remember { mutableStateOf<List<HistoricalReading>>(emptyList()) }
 
     val blePermissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -91,12 +98,20 @@ fun LibreArmApp(
 
     val healthPermissionLauncher = rememberLauncherForActivityResult(
         contract = HealthConnectManager.createRequestPermissionActivityContract()
-    ) { granted ->
-        val writeGranted = granted.containsAll(healthManager.writePermissions)
-        healthGranted = writeGranted
+    ) { _ ->
         healthRequestInFlight = false
-        autoSaveToHealth = writeGranted
-        preferences.autoSaveToHealth = writeGranted
+        scope.launch {
+            val writeGranted = healthManager.hasWritePermissions()
+            val readGranted = healthManager.hasReadPermission()
+            healthGranted = writeGranted
+            healthReadGranted = readGranted
+            // Health Connect won't re-prompt after a user-initiated denial — track it
+            // so the History screen can switch the CTA to "Open Health Connect".
+            healthReadDeniedAfterRequest = !readGranted
+            autoSaveToHealth = writeGranted
+            preferences.autoSaveToHealth = writeGranted
+            if (readGranted) history = healthManager.readRecent()
+        }
     }
 
     val notificationsLauncher = rememberLauncherForActivityResult(
@@ -110,12 +125,16 @@ fun LibreArmApp(
             viewModel.startConnect()
         }
         healthGranted = healthManager.hasWritePermissions()
+        healthReadGranted = healthManager.hasReadPermission()
         healthAvailable = healthManager.availability()
         viewModel.setReadingsCount(preferences.readingsCount)
         viewModel.setDelayBetweenRuns(preferences.delayBetweenRunsSeconds)
         if (!healthGranted && autoSaveToHealth) {
             autoSaveToHealth = false
             preferences.autoSaveToHealth = false
+        }
+        if (healthReadGranted) {
+            history = healthManager.readRecent()
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
@@ -127,12 +146,31 @@ fun LibreArmApp(
         }
     }
 
+    // Re-check Health Connect permissions whenever the activity resumes — covers
+    // the case where the user goes to HC, grants/revokes a permission, then
+    // returns. The permission launcher only fires for our own in-app prompt.
+    LifecycleResumeEffect(Unit) {
+        scope.launch {
+            val writeGranted = healthManager.hasWritePermissions()
+            val readGranted = healthManager.hasReadPermission()
+            healthGranted = writeGranted
+            healthReadGranted = readGranted
+            if (readGranted) {
+                healthReadDeniedAfterRequest = false
+                history = healthManager.readRecent()
+            }
+        }
+        onPauseOrDispose { }
+    }
+
     LaunchedEffect(autoSaveToHealth, healthGranted) {
         viewModel.setOnFinalReading { reading ->
             if (!autoSaveToHealth || !healthGranted) return@setOnFinalReading
             scope.launch {
                 when (healthManager.saveReading(reading, Instant.now().toEpochMilli())) {
-                    HealthConnectManager.SaveResult.Saved -> Unit
+                    HealthConnectManager.SaveResult.Saved -> {
+                        history = healthManager.readRecent()
+                    }
                     HealthConnectManager.SaveResult.MissingPermissions -> {
                         Toast.makeText(context, hcPermissionMissingMessage, Toast.LENGTH_SHORT).show()
                     }
@@ -223,10 +261,28 @@ fun LibreArmApp(
             composable(TopLevel.Home.route) {
                 MainScreen(
                     state = state,
+                    history = history,
                     onStartStop = {
                         if (state.isMeasuring) viewModel.cancelMeasurement() else viewModel.startMeasurement()
                     },
                     onRetryConnect = { viewModel.startConnect() }
+                )
+            }
+            composable(TopLevel.History.route) {
+                HistoryScreen(
+                    healthManager = healthManager,
+                    hasReadPermission = healthReadGranted,
+                    healthAvailable = healthAvailable,
+                    permissionPreviouslyDenied = healthReadDeniedAfterRequest,
+                    onRequestReadPermission = {
+                        healthPermissionLauncher.launch(healthManager.permissions)
+                    },
+                    onOpenHealthConnect = {
+                        healthManager.openHealthConnectIntent()?.let {
+                            runCatching { context.startActivity(it) }
+                        }
+                    },
+                    onInstallHealthConnect = onLaunchInstallIntent
                 )
             }
             composable(TopLevel.Settings.route) {
@@ -263,8 +319,9 @@ fun LibreArmApp(
                         healthRequestInFlight = true
                         scope.launch {
                             val writeGranted = healthManager.hasWritePermissions()
+                            val readGranted = healthManager.hasReadPermission()
                             healthGranted = writeGranted
-                            if (writeGranted) {
+                            if (writeGranted && readGranted) {
                                 autoSaveToHealth = true
                                 preferences.autoSaveToHealth = true
                                 healthRequestInFlight = false
