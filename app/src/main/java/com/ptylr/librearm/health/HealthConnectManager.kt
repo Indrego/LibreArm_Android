@@ -11,10 +11,14 @@ import androidx.health.connect.client.records.BloodPressureRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.metadata.Device
 import androidx.health.connect.client.records.metadata.Metadata
+import androidx.health.connect.client.request.ReadRecordsRequest
+import androidx.health.connect.client.time.TimeRangeFilter
 import androidx.health.connect.client.units.Pressure
 import com.ptylr.librearm.model.BpReading
+import com.ptylr.librearm.model.HistoricalReading
 import java.time.Instant
 import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 import kotlin.math.roundToInt
 
 private const val HEALTH_CONNECT_PACKAGE = "com.google.android.apps.healthdata"
@@ -27,11 +31,47 @@ class HealthConnectManager(private val context: Context) {
         HealthPermission.getWritePermission(HeartRateRecord::class)
     )
 
-    val permissions: Set<String> = writePermissions
+    private val readPermissions: Set<String> = setOf(
+        HealthPermission.getReadPermission(BloodPressureRecord::class)
+    )
+
+    /** Combined bundle requested via the permission launcher. The user can grant or deny each individually. */
+    val permissions: Set<String> = writePermissions + readPermissions
 
     suspend fun hasWritePermissions(): Boolean {
         val granted = client.permissionController.getGrantedPermissions()
         return granted.containsAll(writePermissions)
+    }
+
+    suspend fun hasReadPermission(): Boolean {
+        val granted = client.permissionController.getGrantedPermissions()
+        return granted.containsAll(readPermissions)
+    }
+
+    suspend fun readRecent(daysBack: Long = 30, limit: Int = 10): List<HistoricalReading> {
+        if (!hasReadPermission()) return emptyList()
+        val end = Instant.now()
+        val start = end.minus(daysBack, ChronoUnit.DAYS)
+        return readRange(start, end, limit)
+    }
+
+    suspend fun readRange(start: Instant, end: Instant, pageSize: Int = 1000): List<HistoricalReading> {
+        if (!hasReadPermission()) return emptyList()
+        return runCatching {
+            val request = ReadRecordsRequest(
+                recordType = BloodPressureRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(start, end),
+                ascendingOrder = false,
+                pageSize = pageSize
+            )
+            client.readRecords(request).records.map { record ->
+                HistoricalReading(
+                    time = record.time,
+                    sys = record.systolic.inMillimetersOfMercury,
+                    dia = record.diastolic.inMillimetersOfMercury
+                )
+            }
+        }.getOrElse { emptyList() }
     }
 
     suspend fun saveReading(reading: BpReading, timestampMillis: Long): SaveResult {
@@ -87,6 +127,31 @@ class HealthConnectManager(private val context: Context) {
             data = "https://play.google.com/store/apps/details?id=$HEALTH_CONNECT_PACKAGE".toUri()
             setPackage("com.android.vending")
         }
+    }
+
+    /**
+     * Intent that opens the Health Connect surface where the user can grant or
+     * revoke permissions for LibreArm manually. Health Connect won't re-prompt
+     * via the permission launcher after a user-initiated denial; this is the
+     * recovery path.
+     *
+     * On Android 14+, Health Connect lives in system Settings and is reachable
+     * via the `HEALTH_HOME_SETTINGS` action. On older Android it's a standalone
+     * app with a launcher activity. We try the system action first, then fall
+     * back to the standalone app's launcher. Returns null if neither resolves.
+     *
+     * Note: there's a more specific `MANAGE_HEALTH_PERMISSIONS` action that
+     * would deep-link to LibreArm's app-specific permission page, but it's
+     * restricted to system-signed Health Connect role holders — a third-party
+     * app's `startActivity` call is silently rejected with a SecurityException.
+     */
+    fun openHealthConnectIntent(): Intent? {
+        val pm = context.packageManager
+        val systemIntent = Intent("android.health.connect.action.HEALTH_HOME_SETTINGS")
+        if (pm.queryIntentActivities(systemIntent, 0).isNotEmpty()) {
+            return systemIntent
+        }
+        return pm.getLaunchIntentForPackage(HEALTH_CONNECT_PACKAGE)
     }
 
     enum class Availability { Available, NotInstalled, NeedsUpdate, Unknown }

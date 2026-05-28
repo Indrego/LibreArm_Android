@@ -1,5 +1,7 @@
 package com.ptylr.librearm.model
 
+import java.time.Instant
+
 const val DEFAULT_READINGS_COUNT = 1
 const val DEFAULT_DELAY_SECONDS = 30
 const val MIN_READINGS_COUNT = 1
@@ -12,6 +14,12 @@ data class BpReading(
     val dia: Double,
     val map: Double? = null,
     val hr: Double? = null
+)
+
+data class HistoricalReading(
+    val time: Instant,
+    val sys: Double,
+    val dia: Double
 )
 
 /**

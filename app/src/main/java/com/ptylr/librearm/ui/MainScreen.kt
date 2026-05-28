@@ -36,12 +36,14 @@ import androidx.compose.ui.unit.dp
 import com.ptylr.librearm.R
 import com.ptylr.librearm.model.BatteryStatus
 import com.ptylr.librearm.model.BpState
+import com.ptylr.librearm.model.HistoricalReading
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
 fun MainScreen(
     state: BpState,
+    history: List<HistoricalReading>,
     onStartStop: () -> Unit,
     onRetryConnect: () -> Unit,
     modifier: Modifier = Modifier
@@ -73,6 +75,10 @@ fun MainScreen(
             }
         ) {
             Text(stringResource(if (state.isMeasuring) R.string.action_stop_measurement else R.string.action_start_measurement))
+        }
+
+        if (history.isNotEmpty()) {
+            RecentReadingsCard(history)
         }
 
         if (!state.isConnected) {
@@ -180,6 +186,43 @@ private fun ReadingCard(state: BpState) {
     }
 }
 
+
+@Composable
+private fun RecentReadingsCard(history: List<HistoricalReading>) {
+    val pattern = stringResource(R.string.history_entry_format)
+    val formatter = remember(pattern) {
+        DateTimeFormatter.ofPattern(pattern).withZone(ZoneId.systemDefault())
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(stringResource(R.string.history_recent_readings), style = MaterialTheme.typography.titleSmall)
+            history.forEach { entry ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = formatter.format(entry.time),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    Text(
+                        text = stringResource(R.string.reading_format, entry.sys.toInt(), entry.dia.toInt()),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun KeepScreenOn(enabled: Boolean) {
