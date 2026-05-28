@@ -31,44 +31,98 @@ class HealthConnectManager(private val context: Context) {
         HealthPermission.getWritePermission(HeartRateRecord::class)
     )
 
-    private val readPermissions: Set<String> = setOf(
+    private val readBpPermission: String =
         HealthPermission.getReadPermission(BloodPressureRecord::class)
-    )
+    private val readHrPermission: String =
+        HealthPermission.getReadPermission(HeartRateRecord::class)
 
     /** Combined bundle requested via the permission launcher. The user can grant or deny each individually. */
-    val permissions: Set<String> = writePermissions + readPermissions
+    val permissions: Set<String> =
+        writePermissions + setOf(readBpPermission, readHrPermission)
+
+    /**
+     * Snapshot of the four permission flags Health Connect exposes for this
+     * app. Callers that need more than one flag should prefer
+     * [currentPermissionState] — each `has*` call below makes a separate
+     * cross-process round-trip, so batching matters.
+     *
+     * - [canWrite]: write access to BP **and** HR records. Bundled because
+     *   `saveReading` writes both together.
+     * - [canReadBloodPressure]: gates the History feature entirely.
+     * - [canReadHeartRate]: optional; when denied, History still works for
+     *   BP and the screen surfaces a banner inviting the user to grant it.
+     */
+    data class PermissionState(
+        val canWrite: Boolean,
+        val canReadBloodPressure: Boolean,
+        val canReadHeartRate: Boolean
+    )
+
+    /** One round-trip to Health Connect; preferred over the single-flag helpers when multiple flags are needed. */
+    suspend fun currentPermissionState(): PermissionState {
+        val granted = client.permissionController.getGrantedPermissions()
+        return PermissionState(
+            canWrite = granted.containsAll(writePermissions),
+            canReadBloodPressure = readBpPermission in granted,
+            canReadHeartRate = readHrPermission in granted
+        )
+    }
 
     suspend fun hasWritePermissions(): Boolean {
         val granted = client.permissionController.getGrantedPermissions()
         return granted.containsAll(writePermissions)
     }
 
-    suspend fun hasReadPermission(): Boolean {
-        val granted = client.permissionController.getGrantedPermissions()
-        return granted.containsAll(readPermissions)
-    }
-
     suspend fun readRecent(daysBack: Long = 30, limit: Int = 10): List<HistoricalReading> {
-        if (!hasReadPermission()) return emptyList()
         val end = Instant.now()
         val start = end.minus(daysBack, ChronoUnit.DAYS)
         return readRange(start, end, limit)
     }
 
     suspend fun readRange(start: Instant, end: Instant, pageSize: Int = 1000): List<HistoricalReading> {
-        if (!hasReadPermission()) return emptyList()
+        val perms = currentPermissionState()
+        if (!perms.canReadBloodPressure) return emptyList()
         return runCatching {
-            val request = ReadRecordsRequest(
+            val bpRequest = ReadRecordsRequest(
                 recordType = BloodPressureRecord::class,
                 timeRangeFilter = TimeRangeFilter.between(start, end),
                 ascendingOrder = false,
                 pageSize = pageSize
             )
-            client.readRecords(request).records.map { record ->
+            val bpRecords = client.readRecords(bpRequest).records
+
+            // Heart rate is recorded alongside BP with the same Instant in saveReading.
+            // We query HR per BP record with a 1ms window, rather than a single
+            // range query, because users with wearables can have thousands of
+            // continuous HR samples per day — a single ranged query would blow
+            // past pageSize on unrelated samples and miss the BP-paired ones.
+            // HR read perm is optional; if denied, surface BP without HR.
+            val hrByTime: Map<Instant, Double> = if (perms.canReadHeartRate) {
+                bpRecords.mapNotNull { bp ->
+                    runCatching {
+                        val hrRequest = ReadRecordsRequest(
+                            recordType = HeartRateRecord::class,
+                            timeRangeFilter = TimeRangeFilter.between(
+                                bp.time, bp.time.plusMillis(1)
+                            ),
+                            pageSize = 50
+                        )
+                        client.readRecords(hrRequest).records
+                            .flatMap { it.samples }
+                            .firstOrNull { it.time == bp.time }
+                            ?.let { bp.time to it.beatsPerMinute.toDouble() }
+                    }.getOrNull()
+                }.toMap()
+            } else {
+                emptyMap()
+            }
+
+            bpRecords.map { record ->
                 HistoricalReading(
                     time = record.time,
                     sys = record.systolic.inMillimetersOfMercury,
-                    dia = record.diastolic.inMillimetersOfMercury
+                    dia = record.diastolic.inMillimetersOfMercury,
+                    hr = hrByTime[record.time]
                 )
             }
         }.getOrElse { emptyList() }

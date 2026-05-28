@@ -215,7 +215,14 @@ private fun RecentReadingsCard(history: List<HistoricalReading>) {
                         color = MaterialTheme.colorScheme.secondary
                     )
                     Text(
-                        text = stringResource(R.string.reading_format, entry.sys.toInt(), entry.dia.toInt()),
+                        text = entry.hr?.let {
+                            stringResource(
+                                R.string.reading_with_hr_format,
+                                entry.sys.toInt(),
+                                entry.dia.toInt(),
+                                it.toInt()
+                            )
+                        } ?: stringResource(R.string.reading_format, entry.sys.toInt(), entry.dia.toInt()),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }

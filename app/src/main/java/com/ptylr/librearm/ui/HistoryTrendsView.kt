@@ -35,14 +35,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ptylr.librearm.R
 import com.ptylr.librearm.model.HistoricalReading
+import com.ptylr.librearm.ui.theme.LocalChartColors
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-internal val SystolicColor = Color(0xFFE53935)
-internal val DiastolicColor = Color(0xFF1E88E5)
-
-private data class DailyAverage(val sys: Double, val dia: Double)
+private data class DailyAverage(val sys: Double, val dia: Double, val hr: Double?)
 
 @Composable
 internal fun TrendsView(
@@ -50,14 +48,17 @@ internal fun TrendsView(
     readings: List<HistoricalReading>,
     zone: ZoneId
 ) {
+    val chartColors = LocalChartColors.current
     val dailyAverages: Map<Int, DailyAverage> = remember(readings, month, zone) {
         readings
             .filter { YearMonth.from(it.time.atZone(zone).toLocalDate()) == month }
             .groupBy { it.time.atZone(zone).dayOfMonth }
             .mapValues { (_, list) ->
+                val hrValues = list.mapNotNull { it.hr }
                 DailyAverage(
                     sys = list.map { it.sys }.average(),
-                    dia = list.map { it.dia }.average()
+                    dia = list.map { it.dia }.average(),
+                    hr = if (hrValues.isNotEmpty()) hrValues.average() else null
                 )
             }
             .toSortedMap()
@@ -89,15 +90,21 @@ internal fun TrendsView(
                 .height(280.dp)
         )
 
+        val hrValues = dailyAverages.values.mapNotNull { it.hr }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 12.dp),
             horizontalArrangement = Arrangement.Center
         ) {
-            LegendSwatch(color = SystolicColor, label = stringResource(R.string.history_legend_systolic))
+            LegendSwatch(color = chartColors.systolic, label = stringResource(R.string.history_legend_systolic))
             Spacer(modifier = Modifier.width(24.dp))
-            LegendSwatch(color = DiastolicColor, label = stringResource(R.string.history_legend_diastolic))
+            LegendSwatch(color = chartColors.diastolic, label = stringResource(R.string.history_legend_diastolic))
+            if (hrValues.isNotEmpty()) {
+                Spacer(modifier = Modifier.width(24.dp))
+                LegendSwatch(color = chartColors.heartRate, label = stringResource(R.string.history_legend_heart_rate))
+            }
         }
 
         Card(
@@ -125,6 +132,18 @@ internal fun TrendsView(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.secondary
                 )
+                if (hrValues.isNotEmpty()) {
+                    Text(
+                        stringResource(
+                            R.string.history_summary_hr,
+                            hrValues.average().toInt(),
+                            hrValues.min().toInt(),
+                            hrValues.max().toInt()
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
                 Text(
                     stringResource(R.string.history_summary_days, dailyAverages.size),
                     style = MaterialTheme.typography.bodySmall,
@@ -157,6 +176,7 @@ private fun TrendChart(
     dailyAverages: Map<Int, DailyAverage>,
     modifier: Modifier = Modifier
 ) {
+    val chartColors = LocalChartColors.current
     val density = LocalDensity.current
     val monthTitlePattern = stringResource(R.string.history_short_format)
     val monthTitleFormatter = remember(monthTitlePattern) { DateTimeFormatter.ofPattern(monthTitlePattern) }
@@ -251,7 +271,11 @@ private fun TrendChart(
             }
         }
 
-        drawSeries(SystolicColor, dailyAverages.map { it.key to it.value.sys })
-        drawSeries(DiastolicColor, dailyAverages.map { it.key to it.value.dia })
+        drawSeries(chartColors.systolic, dailyAverages.map { it.key to it.value.sys })
+        drawSeries(chartColors.diastolic, dailyAverages.map { it.key to it.value.dia })
+        val hrPoints = dailyAverages.mapNotNull { (day, value) -> value.hr?.let { day to it } }
+        if (hrPoints.isNotEmpty()) {
+            drawSeries(chartColors.heartRate, hrPoints)
+        }
     }
 }

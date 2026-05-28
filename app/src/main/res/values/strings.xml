@@ -6,6 +6,7 @@
 
     <!-- Reading display -->
     <string name="reading_format">%1$d/%2$d mmHg</string>
+    <string name="reading_with_hr_format">%1$d/%2$d mmHg · %3$d bpm</string>
     <string name="reading_map_format">%1$d MAP</string>
     <string name="reading_bpm_format">%1$d bpm</string>
     <string name="reading_none_yet">No reading yet</string>
@@ -75,9 +76,11 @@
     <string name="history_no_chart">No readings to chart this month.</string>
     <string name="history_legend_systolic">Systolic</string>
     <string name="history_legend_diastolic">Diastolic</string>
+    <string name="history_legend_heart_rate">Heart rate</string>
     <string name="history_summary_title">Summary</string>
     <string name="history_summary_sys">Systolic — avg %1$d, range %2$d–%3$d mmHg</string>
     <string name="history_summary_dia">Diastolic — avg %1$d, range %2$d–%3$d mmHg</string>
+    <string name="history_summary_hr">Heart rate — avg %1$d, range %2$d–%3$d bpm</string>
     <string name="history_summary_days">%1$d day(s) with readings</string>
     <string name="history_reading_recorded">Reading recorded</string>
     <string name="history_recent_readings">Recent Readings</string>
@@ -93,6 +96,8 @@
     <string name="history_read_permission_open_hc">Open Health Connect</string>
     <string name="history_read_permission_install">Install Health Connect</string>
     <string name="history_tap_day_hint">Tap a date to see its readings</string>
+    <string name="history_hr_permission_banner_body">Grant Heart Rate read access in Health Connect to see pulse alongside your readings.</string>
+    <string name="history_hr_permission_banner_action">Open</string>
     <string name="history_day_detail_format">EEEE, MMM d</string>
     <string name="history_time_only_format">HH:mm</string>
 

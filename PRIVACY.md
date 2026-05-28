@@ -22,8 +22,9 @@ LibreArm_Android does **not** collect, transmit, or store any personal informati
 - LibreArm requests permission to **write** the following data types to Google Health Connect:
     - Blood Pressure (systolic and diastolic)
     - Heart Rate
-- LibreArm requests permission to **read** the following data type from Google Health Connect, solely to display your measurement history within the app:
+- LibreArm requests permission to **read** the following data types from Google Health Connect, solely to display your measurement history within the app:
     - Blood Pressure (systolic and diastolic)
+    - Heart Rate
 - LibreArm_Android does not share or sell any Health Connect data.
 - Health data access is managed entirely through Google's Health Connect APIs.
 

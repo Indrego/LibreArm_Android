@@ -5,7 +5,31 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
 import com.ptylr.librearm.model.ThemeMode
+
+/** Theme-aware palette for the trend-chart series in HistoryScreen. */
+data class ChartColors(
+    val systolic: Color,
+    val diastolic: Color,
+    val heartRate: Color
+)
+
+private val LightChartColors = ChartColors(
+    systolic = ChartSystolicLight,
+    diastolic = ChartDiastolicLight,
+    heartRate = ChartHeartRateLight
+)
+
+private val DarkChartColors = ChartColors(
+    systolic = ChartSystolicDark,
+    diastolic = ChartDiastolicDark,
+    heartRate = ChartHeartRateDark
+)
+
+val LocalChartColors = staticCompositionLocalOf { LightChartColors }
 
 private val LightColors = lightColorScheme(
     primary = PrimaryLight,
@@ -87,10 +111,13 @@ fun LibreArmTheme(
         ThemeMode.Light -> false
         ThemeMode.Dark -> true
     }
-    MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
-        typography = AppTypography,
-        shapes = AppShapes,
-        content = content
-    )
+    val chartColors = if (darkTheme) DarkChartColors else LightChartColors
+    CompositionLocalProvider(LocalChartColors provides chartColors) {
+        MaterialTheme(
+            colorScheme = if (darkTheme) DarkColors else LightColors,
+            typography = AppTypography,
+            shapes = AppShapes,
+            content = content
+        )
+    }
 }

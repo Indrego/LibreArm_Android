@@ -46,7 +46,8 @@ private enum class HistoryTab { Calendar, Trends }
 @Composable
 fun HistoryScreen(
     healthManager: HealthConnectManager,
-    hasReadPermission: Boolean,
+    hasBloodPressureReadPermission: Boolean,
+    hasHeartRateReadPermission: Boolean,
     healthAvailable: HealthConnectManager.Availability,
     permissionPreviouslyDenied: Boolean,
     onRequestReadPermission: () -> Unit,
@@ -54,7 +55,7 @@ fun HistoryScreen(
     onInstallHealthConnect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (!hasReadPermission) {
+    if (!hasBloodPressureReadPermission) {
         ReadPermissionRequired(
             modifier = modifier,
             healthAvailable = healthAvailable,
@@ -90,6 +91,9 @@ fun HistoryScreen(
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
+        if (!hasHeartRateReadPermission) {
+            HeartRatePermissionBanner(onOpenHealthConnect = onOpenHealthConnect)
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
