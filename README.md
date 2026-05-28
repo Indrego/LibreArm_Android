@@ -14,7 +14,7 @@ Features the Android port adds beyond the iOS app's feature set:
 - **Configurable readings** — take 1, 2, or 3 readings per measurement (averaged when more than one), selectable in Settings
 - **Retry on invalid reading** — an implausible reading prompts a retry; three consecutive failures auto-cancel the measurement
 - **Dark mode** — Auto / Light / Dark theme selector in Settings, applied immediately
-- **Measurement history** — Calendar and Trends views of past readings, read back from Health Connect
+- **Measurement history** — Calendar and Trends views of past blood-pressure and heart-rate readings, read back from Health Connect
 
 ## 📋 Inherited from iOS
 
@@ -83,7 +83,7 @@ Permissions requested at runtime:
 - **Bluetooth**: `android.bluetooth.le` (scan filtered by Blood Pressure Service 0x1810)
   - Blood Pressure Service (0x1810): measurement char 0x2A35 + vendor control UUID `583CB5B3-875D-40ED-9098-C39EB0C1983D`
   - Battery Service (0x180F): battery level char 0x2A19
-- **Health**: [Health Connect](https://developer.android.com/health-and-fitness/guides/health-connect) (`BloodPressureRecord` + `HeartRateRecord`) — writes readings, and reads blood pressure history back for the Calendar / Trends views
+- **Health**: [Health Connect](https://developer.android.com/health-and-fitness/guides/health-connect) (`BloodPressureRecord` + `HeartRateRecord`) — writes readings, and reads blood pressure and heart rate history back for the Calendar / Trends views
 - **Notifications**: `NotificationManagerCompat` on a dedicated channel, gated by `ProcessLifecycleOwner` so alerts only fire when the app is backgrounded
 - **Persistence**: `SharedPreferences` (`librearm_prefs`)
 
@@ -96,7 +96,7 @@ The app uses the same debounce strategy as the iOS version: only the **final** r
 - LibreArm does **not** connect to the internet.
 - All readings stay on your device.
 - Data is saved into **Health Connect** only when you've enabled the toggle and granted permission.
-- The history views read your blood pressure back from Health Connect, with your permission, solely to display it in the app.
+- The history views read your blood pressure and heart rate back from Health Connect, with your permission, solely to display them in the app.
 
 ---
 

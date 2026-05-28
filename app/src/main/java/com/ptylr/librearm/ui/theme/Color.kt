@@ -82,3 +82,14 @@ val SurfaceContainerLowDark = Color(0xFF1A1B22)
 val SurfaceContainerDark = Color(0xFF1E1F26)
 val SurfaceContainerHighDark = Color(0xFF292930)
 val SurfaceContainerHighestDark = Color(0xFF34343B)
+
+// --- Chart series colours ---
+// Tone 50ish for light theme (vivid against light surface), tone 70ish for
+// dark theme (lighter so they remain readable against dark surface).
+val ChartSystolicLight = Color(0xFFE53935)
+val ChartDiastolicLight = Color(0xFF1E88E5)
+val ChartHeartRateLight = Color(0xFF8E24AA)
+
+val ChartSystolicDark = Color(0xFFEF9A9A)
+val ChartDiastolicDark = Color(0xFF90CAF9)
+val ChartHeartRateDark = Color(0xFFCE93D8)

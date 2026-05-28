@@ -83,12 +83,23 @@ fun LibreArmApp(
     val readingInvalidMessage = stringResource(R.string.toast_reading_invalid)
 
     var autoSaveToHealth by rememberSaveable { mutableStateOf(preferences.autoSaveToHealth) }
-    var healthGranted by remember { mutableStateOf(false) }
-    var healthReadGranted by remember { mutableStateOf(false) }
-    var healthReadDeniedAfterRequest by remember { mutableStateOf(false) }
+    var healthWriteGranted by remember { mutableStateOf(false) }
+    var healthBpReadGranted by remember { mutableStateOf(false) }
+    var healthHrReadGranted by remember { mutableStateOf(false) }
+    var healthBpReadDeniedAfterRequest by remember { mutableStateOf(false) }
     var healthAvailable by remember { mutableStateOf(HealthConnectManager.Availability.Unknown) }
     var healthRequestInFlight by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf<List<HistoricalReading>>(emptyList()) }
+
+    // Single round-trip refresh of all three HC permission flags. Local
+    // because it captures the var delegates above.
+    suspend fun refreshHealthPermissions(): HealthConnectManager.PermissionState {
+        val perms = healthManager.currentPermissionState()
+        healthWriteGranted = perms.canWrite
+        healthBpReadGranted = perms.canReadBloodPressure
+        healthHrReadGranted = perms.canReadHeartRate
+        return perms
+    }
 
     val blePermissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -101,16 +112,13 @@ fun LibreArmApp(
     ) { _ ->
         healthRequestInFlight = false
         scope.launch {
-            val writeGranted = healthManager.hasWritePermissions()
-            val readGranted = healthManager.hasReadPermission()
-            healthGranted = writeGranted
-            healthReadGranted = readGranted
+            val perms = refreshHealthPermissions()
             // Health Connect won't re-prompt after a user-initiated denial — track it
             // so the History screen can switch the CTA to "Open Health Connect".
-            healthReadDeniedAfterRequest = !readGranted
-            autoSaveToHealth = writeGranted
-            preferences.autoSaveToHealth = writeGranted
-            if (readGranted) history = healthManager.readRecent()
+            healthBpReadDeniedAfterRequest = !perms.canReadBloodPressure
+            autoSaveToHealth = perms.canWrite
+            preferences.autoSaveToHealth = perms.canWrite
+            if (perms.canReadBloodPressure) history = healthManager.readRecent()
         }
     }
 
@@ -124,16 +132,15 @@ fun LibreArmApp(
         } else {
             viewModel.startConnect()
         }
-        healthGranted = healthManager.hasWritePermissions()
-        healthReadGranted = healthManager.hasReadPermission()
+        val perms = refreshHealthPermissions()
         healthAvailable = healthManager.availability()
         viewModel.setReadingsCount(preferences.readingsCount)
         viewModel.setDelayBetweenRuns(preferences.delayBetweenRunsSeconds)
-        if (!healthGranted && autoSaveToHealth) {
+        if (!perms.canWrite && autoSaveToHealth) {
             autoSaveToHealth = false
             preferences.autoSaveToHealth = false
         }
-        if (healthReadGranted) {
+        if (perms.canReadBloodPressure) {
             history = healthManager.readRecent()
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -151,21 +158,18 @@ fun LibreArmApp(
     // returns. The permission launcher only fires for our own in-app prompt.
     LifecycleResumeEffect(Unit) {
         scope.launch {
-            val writeGranted = healthManager.hasWritePermissions()
-            val readGranted = healthManager.hasReadPermission()
-            healthGranted = writeGranted
-            healthReadGranted = readGranted
-            if (readGranted) {
-                healthReadDeniedAfterRequest = false
+            val perms = refreshHealthPermissions()
+            if (perms.canReadBloodPressure) {
+                healthBpReadDeniedAfterRequest = false
                 history = healthManager.readRecent()
             }
         }
         onPauseOrDispose { }
     }
 
-    LaunchedEffect(autoSaveToHealth, healthGranted) {
+    LaunchedEffect(autoSaveToHealth, healthWriteGranted) {
         viewModel.setOnFinalReading { reading ->
-            if (!autoSaveToHealth || !healthGranted) return@setOnFinalReading
+            if (!autoSaveToHealth || !healthWriteGranted) return@setOnFinalReading
             scope.launch {
                 when (healthManager.saveReading(reading, Instant.now().toEpochMilli())) {
                     HealthConnectManager.SaveResult.Saved -> {
@@ -271,9 +275,10 @@ fun LibreArmApp(
             composable(TopLevel.History.route) {
                 HistoryScreen(
                     healthManager = healthManager,
-                    hasReadPermission = healthReadGranted,
+                    hasBloodPressureReadPermission = healthBpReadGranted,
+                    hasHeartRateReadPermission = healthHrReadGranted,
                     healthAvailable = healthAvailable,
-                    permissionPreviouslyDenied = healthReadDeniedAfterRequest,
+                    permissionPreviouslyDenied = healthBpReadDeniedAfterRequest,
                     onRequestReadPermission = {
                         healthPermissionLauncher.launch(healthManager.permissions)
                     },
@@ -291,7 +296,7 @@ fun LibreArmApp(
                     delaySeconds = state.delayBetweenRunsSeconds,
                     isMeasuring = state.isMeasuring,
                     autoSaveToHealth = autoSaveToHealth,
-                    healthAuthorized = healthGranted,
+                    healthAuthorized = healthWriteGranted,
                     healthAvailable = healthAvailable,
                     healthRequestInFlight = healthRequestInFlight,
                     themeMode = themeMode,
@@ -318,10 +323,8 @@ fun LibreArmApp(
                         }
                         healthRequestInFlight = true
                         scope.launch {
-                            val writeGranted = healthManager.hasWritePermissions()
-                            val readGranted = healthManager.hasReadPermission()
-                            healthGranted = writeGranted
-                            if (writeGranted && readGranted) {
+                            val perms = refreshHealthPermissions()
+                            if (perms.canWrite && perms.canReadBloodPressure) {
                                 autoSaveToHealth = true
                                 preferences.autoSaveToHealth = true
                                 healthRequestInFlight = false

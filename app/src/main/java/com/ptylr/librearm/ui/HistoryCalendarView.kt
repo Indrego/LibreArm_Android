@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ptylr.librearm.R
 import com.ptylr.librearm.model.HistoricalReading
+import com.ptylr.librearm.ui.theme.LocalChartColors
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
@@ -48,6 +49,7 @@ internal fun CalendarView(
     readings: List<HistoricalReading>,
     zone: ZoneId
 ) {
+    val chartColors = LocalChartColors.current
     val daysWithReadings: Set<Int> = remember(readings, month, zone) {
         readings
             .map { it.time.atZone(zone).toLocalDate() }
@@ -118,13 +120,13 @@ internal fun CalendarView(
                             val isSelected = selectedDay == dayNum
 
                             val background = when {
-                                isSelected && hasReadings -> DiastolicColor
+                                isSelected && hasReadings -> chartColors.diastolic
                                 isToday -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                                 else -> Color.Transparent
                             }
                             val textColor = when {
                                 isSelected && hasReadings -> Color.White
-                                hasReadings -> DiastolicColor
+                                hasReadings -> chartColors.diastolic
                                 else -> MaterialTheme.colorScheme.onSurface
                             }
 
@@ -219,7 +221,14 @@ private fun DayDetailCard(date: LocalDate, readings: List<HistoricalReading>) {
                         color = MaterialTheme.colorScheme.secondary
                     )
                     Text(
-                        text = stringResource(R.string.reading_format, entry.sys.toInt(), entry.dia.toInt()),
+                        text = entry.hr?.let {
+                            stringResource(
+                                R.string.reading_with_hr_format,
+                                entry.sys.toInt(),
+                                entry.dia.toInt(),
+                                it.toInt()
+                            )
+                        } ?: stringResource(R.string.reading_format, entry.sys.toInt(), entry.dia.toInt()),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }

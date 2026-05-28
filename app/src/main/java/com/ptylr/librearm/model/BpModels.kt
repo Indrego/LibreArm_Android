@@ -19,7 +19,8 @@ data class BpReading(
 data class HistoricalReading(
     val time: Instant,
     val sys: Double,
-    val dia: Double
+    val dia: Double,
+    val hr: Double? = null
 )
 
 /**
