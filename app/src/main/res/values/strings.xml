@@ -92,6 +92,9 @@
     <string name="history_read_permission_grant">Grant access</string>
     <string name="history_read_permission_open_hc">Open Health Connect</string>
     <string name="history_read_permission_install">Install Health Connect</string>
+    <string name="history_tap_day_hint">Tap a date to see its readings</string>
+    <string name="history_day_detail_format">EEEE, MMM d</string>
+    <string name="history_time_only_format">HH:mm</string>
 
     <!-- Footer -->
     <string name="footer_credits">Original iOS app by Paul Taylor — Android port by agreenbhm</string>
