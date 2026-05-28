@@ -1,5 +1,12 @@
 package com.ptylr.librearm.model
 
+const val DEFAULT_READINGS_COUNT = 1
+const val DEFAULT_DELAY_SECONDS = 30
+const val MIN_READINGS_COUNT = 1
+const val MAX_READINGS_COUNT = 3
+
+enum class ThemeMode { Auto, Light, Dark }
+
 data class BpReading(
     val sys: Double,
     val dia: Double,
@@ -25,8 +32,6 @@ sealed class BpStatus {
     data class MeasuringRun(val current: Int, val total: Int) : BpStatus()
     data class Countdown(val secondsRemaining: Int, val justCompletedRun: Int, val total: Int) : BpStatus()
     data class BatteryCriticalBlocked(val level: Int) : BpStatus()
-    data object MeasurementInvalid : BpStatus()
-    data object AverageSessionInvalid : BpStatus()
     data object AverageReadingInvalid : BpStatus()
     /** A reading failed validation; the session is paused awaiting Retry or Cancel from the user. */
     data class RetryPrompt(val failedRun: Int, val totalRuns: Int) : BpStatus()
@@ -56,7 +61,7 @@ data class BpState(
     val isConnected: Boolean = false,
     val canMeasure: Boolean = false,
     val isMeasuring: Boolean = false,
-    val readingsCount: Int = 1,
-    val delayBetweenRunsSeconds: Int = 30,
+    val readingsCount: Int = DEFAULT_READINGS_COUNT,
+    val delayBetweenRunsSeconds: Int = DEFAULT_DELAY_SECONDS,
     val battery: BatteryStatus = BatteryStatus.Unavailable
 )

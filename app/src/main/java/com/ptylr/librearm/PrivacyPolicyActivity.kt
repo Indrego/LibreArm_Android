@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -16,7 +17,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
+import com.ptylr.librearm.model.ThemeMode
+import com.ptylr.librearm.prefs.Preferences
 import com.ptylr.librearm.ui.PolicyMarkdown
 import com.ptylr.librearm.ui.theme.LibreArmTheme
 
@@ -24,21 +28,32 @@ import com.ptylr.librearm.ui.theme.LibreArmTheme
  * Displays the app's privacy policy. Launched by Health Connect's permission
  * screen (via the manifest rationale intents) and from the About screen. Reads
  * the policy bundled at build time from PRIVACY.md, so it works offline — the
- * app holds no INTERNET permission.
+ * app holds no INTERNET permission. Honors the user's Auto/Light/Dark choice.
  */
 class PrivacyPolicyActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
-        )
         val policy = runCatching {
             assets.open("privacy_policy.md").bufferedReader().use { it.readText() }
         }.getOrDefault("")
+        val themeMode = Preferences(this).themeMode
         setContent {
-            LibreArmTheme {
+            val darkTheme = when (themeMode) {
+                ThemeMode.Auto -> isSystemInDarkTheme()
+                ThemeMode.Light -> false
+                ThemeMode.Dark -> true
+            }
+            DisposableEffect(darkTheme) {
+                val barStyle = if (darkTheme) {
+                    SystemBarStyle.dark(Color.TRANSPARENT)
+                } else {
+                    SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                }
+                enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+                onDispose {}
+            }
+            LibreArmTheme(themeMode = themeMode) {
                 Scaffold(
                     topBar = {
                         TopAppBar(

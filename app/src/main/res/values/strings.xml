@@ -86,6 +86,11 @@
     <!-- Settings screen -->
     <string name="settings_section_measurement">Measurement</string>
     <string name="settings_section_storage">Storage</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="setting_theme">Theme</string>
+    <string name="theme_auto">Auto</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
 
     <!-- Hypertension graph -->
     <string name="graph_zone_stage2">High: Stage 2 Hypertension</string>

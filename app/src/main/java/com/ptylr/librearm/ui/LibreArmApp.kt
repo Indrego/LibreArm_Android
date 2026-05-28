@@ -46,6 +46,7 @@ import com.ptylr.librearm.R
 import com.ptylr.librearm.ble.BlePermissions
 import com.ptylr.librearm.health.HealthConnectManager
 import com.ptylr.librearm.model.BpStatus
+import com.ptylr.librearm.model.ThemeMode
 import com.ptylr.librearm.prefs.Preferences
 import java.time.Instant
 import kotlinx.coroutines.launch
@@ -66,6 +67,8 @@ fun LibreArmApp(
     viewModel: BpViewModel,
     healthManager: HealthConnectManager,
     preferences: Preferences,
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
     onOpenUrl: (String) -> Unit,
     onLaunchInstallIntent: () -> Unit
 ) {
@@ -235,6 +238,8 @@ fun LibreArmApp(
                     healthAuthorized = healthGranted,
                     healthAvailable = healthAvailable,
                     healthRequestInFlight = healthRequestInFlight,
+                    themeMode = themeMode,
+                    onThemeModeChange = onThemeModeChange,
                     onReadingsCountChange = { count ->
                         viewModel.setReadingsCount(count)
                         preferences.readingsCount = count

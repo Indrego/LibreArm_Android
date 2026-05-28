@@ -3,6 +3,11 @@ package com.ptylr.librearm.prefs
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import com.ptylr.librearm.model.DEFAULT_DELAY_SECONDS
+import com.ptylr.librearm.model.DEFAULT_READINGS_COUNT
+import com.ptylr.librearm.model.MAX_READINGS_COUNT
+import com.ptylr.librearm.model.MIN_READINGS_COUNT
+import com.ptylr.librearm.model.ThemeMode
 
 /**
  * Typed wrapper around the app's SharedPreferences. Keys live here so callers
@@ -22,12 +27,20 @@ class Preferences(context: Context) {
         set(value) = prefs.edit { putBoolean(KEY_AUTO_HEALTH, value) }
 
     var readingsCount: Int
-        get() = prefs.getInt(KEY_READINGS_COUNT, DEFAULT_READINGS_COUNT).coerceIn(1, 3)
-        set(value) = prefs.edit { putInt(KEY_READINGS_COUNT, value.coerceIn(1, 3)) }
+        get() = prefs.getInt(KEY_READINGS_COUNT, DEFAULT_READINGS_COUNT)
+            .coerceIn(MIN_READINGS_COUNT, MAX_READINGS_COUNT)
+        set(value) = prefs.edit {
+            putInt(KEY_READINGS_COUNT, value.coerceIn(MIN_READINGS_COUNT, MAX_READINGS_COUNT))
+        }
 
     var delayBetweenRunsSeconds: Int
         get() = prefs.getInt(KEY_DELAY_BETWEEN_RUNS, DEFAULT_DELAY_SECONDS)
         set(value) = prefs.edit { putInt(KEY_DELAY_BETWEEN_RUNS, value) }
+
+    var themeMode: ThemeMode
+        get() = runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME_MODE, null) ?: ThemeMode.Auto.name) }
+            .getOrDefault(ThemeMode.Auto)
+        set(value) = prefs.edit { putString(KEY_THEME_MODE, value.name) }
 
     /**
      * One-time migration from the boolean `pref_average_three` (true → 3, false → 1)
@@ -50,7 +63,6 @@ class Preferences(context: Context) {
         private const val KEY_LEGACY_AVERAGE_THREE = "pref_average_three"
         private const val KEY_READINGS_COUNT = "pref_readings_count"
         private const val KEY_DELAY_BETWEEN_RUNS = "pref_delay_between_runs"
-        const val DEFAULT_DELAY_SECONDS = 30
-        const val DEFAULT_READINGS_COUNT = 1
+        private const val KEY_THEME_MODE = "pref_theme_mode"
     }
 }
