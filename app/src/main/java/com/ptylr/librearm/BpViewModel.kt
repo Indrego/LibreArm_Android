@@ -18,6 +18,7 @@ class BpViewModel(application: Application) : AndroidViewModel(application) {
     fun startConnect(timeoutSeconds: Long = 30) = client.startConnect(timeoutSeconds)
     fun startMeasurement() = client.startMeasurement()
     fun cancelMeasurement() = client.cancelMeasurement()
+    fun retryFailedReading() = client.retryFailedReading()
     fun setReadingsCount(count: Int) = client.setReadingsCount(count)
     fun setDelayBetweenRuns(seconds: Int) = client.setDelayBetweenRuns(seconds)
     fun setOnFinalReading(handler: ((BpReading) -> Unit)?) { client.onFinalReading = handler }

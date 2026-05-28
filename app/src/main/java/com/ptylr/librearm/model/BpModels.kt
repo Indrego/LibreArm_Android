@@ -28,6 +28,10 @@ sealed class BpStatus {
     data object MeasurementInvalid : BpStatus()
     data object AverageSessionInvalid : BpStatus()
     data object AverageReadingInvalid : BpStatus()
+    /** A reading failed validation; the session is paused awaiting Retry or Cancel from the user. */
+    data class RetryPrompt(val failedRun: Int, val totalRuns: Int) : BpStatus()
+    /** Same run failed [MAX_RETRIES] times in a row; the session was auto-cancelled. */
+    data object RetryLimitExceeded : BpStatus()
     data class NotifyError(val gattStatus: Int) : BpStatus()
 }
 

@@ -48,7 +48,17 @@
     <string name="status_measurement_invalid">Measurement invalid or incomplete — please try again. Check cuff fit and battery.</string>
     <string name="status_average_session_invalid">Average session invalid — not all readings were valid. Please try again.</string>
     <string name="status_average_reading_invalid">Average reading invalid — please try again.</string>
+    <string name="status_retry_prompt_single">Reading was invalid.</string>
+    <string name="status_retry_prompt_multi">Reading %1$d of %2$d was invalid.</string>
+    <string name="status_retry_limit_exceeded">Too many invalid readings in a row — session cancelled. Please try again.</string>
     <string name="status_notify_error">Notify error: %1$d</string>
+
+    <!-- Retry / cancel prompt dialog -->
+    <string name="retry_dialog_title">Reading invalid</string>
+    <string name="retry_dialog_message_single">The reading didn\'t pass validation. Retry this measurement or cancel?</string>
+    <string name="retry_dialog_message_multi">Reading %1$d of %2$d didn\'t pass validation. Retry just this reading, or cancel the whole session?</string>
+    <string name="retry_dialog_retry">Retry</string>
+    <string name="retry_dialog_cancel">Cancel</string>
 
     <!-- Battery line (BatteryStatus) -->
     <string name="battery_unavailable">Battery: unavailable</string>

@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 /**
  * BLE client for QardioArm blood pressure cuff. Connection management,
  * session debouncing, configurable readings count (1, 2, or 3) with
- * adjustable inter-run delay,
+ * adjustable inter-run delay, retry-or-cancel prompt for invalid readings,
  * battery monitoring with low/critical thresholds, strict reading
  * validation, and final reading callback.
  */
@@ -71,6 +71,8 @@ class BpClient(
     private var hasFiredFinal = false
     /** 1-based index of the current run within the session (e.g. 2 of 3). */
     private var currentRunIndex = 0
+    /** Number of consecutive failures on [currentRunIndex]. */
+    private var retriesForCurrentRun = 0
     private val accumulatedReadings = mutableListOf<BpReading>()
 
     private var lastBatteryStage: BatteryStage = BatteryStage.UNKNOWN
@@ -146,6 +148,7 @@ class BpClient(
         finalizeJob?.cancel()
         countdownJob?.cancel()
         currentRunIndex = 1
+        retriesForCurrentRun = 0
 
         val total = _state.value.readingsCount
         _state.update {
@@ -163,6 +166,54 @@ class BpClient(
             // Each op suspends on the queue, so battery read + start write are serialized
             // and the start-command write is never silently dropped.
             readBatteryLevelQueued()
+            performSingleRunStart()
+        }
+    }
+
+    /**
+     * Called when the user taps **Retry** on the failed-reading prompt. Waits
+     * [RETRY_DELAY_SECONDS] (gives the arm time to recover) and then re-runs
+     * the same run index. Successful retries reset the per-run failure counter.
+     */
+    fun retryFailedReading() {
+        if (!sessionActive) return
+        if (_state.value.status !is BpStatus.RetryPrompt) return
+
+        val total = _state.value.readingsCount
+        finalizeJob?.cancel()
+        countdownJob?.cancel()
+
+        var countdown = RETRY_DELAY_SECONDS
+        fun postCountdown() {
+            _state.update {
+                it.copy(
+                    status = BpStatus.Countdown(
+                        secondsRemaining = countdown,
+                        justCompletedRun = (currentRunIndex - 1).coerceAtLeast(0),
+                        total = total
+                    ),
+                    isMeasuring = true
+                )
+            }
+        }
+
+        postCountdown()
+        countdownJob = scope.launch {
+            while (countdown > 0) {
+                delay(1000)
+                countdown -= 1
+                postCountdown()
+            }
+            _state.update {
+                it.copy(
+                    status = if (total > 1) {
+                        BpStatus.MeasuringRun(current = currentRunIndex, total = total)
+                    } else {
+                        BpStatus.Measuring
+                    },
+                    isMeasuring = true
+                )
+            }
             performSingleRunStart()
         }
     }
@@ -201,6 +252,7 @@ class BpClient(
         sessionActive = false
         hasFiredFinal = true
         currentRunIndex = 0
+        retriesForCurrentRun = 0
         accumulatedReadings.clear()
         finalizeJob?.cancel()
         countdownJob?.cancel()
@@ -506,10 +558,27 @@ class BpClient(
         val total = _state.value.readingsCount
 
         if (!BpValidation.isValid(reading)) {
-            failSession(if (total > 1) BpStatus.AverageSessionInvalid else BpStatus.MeasurementInvalid)
+            retriesForCurrentRun += 1
+            if (retriesForCurrentRun >= MAX_RETRIES) {
+                failSession(BpStatus.RetryLimitExceeded)
+            } else {
+                // Halt session loop and wait for user to tap Retry or Cancel on the dialog.
+                _state.update {
+                    it.copy(
+                        lastReading = null,
+                        isMeasuring = false,
+                        status = BpStatus.RetryPrompt(
+                            failedRun = currentRunIndex,
+                            totalRuns = total
+                        )
+                    )
+                }
+            }
             return
         }
 
+        // Reading is valid — accept it, reset the per-run retry counter, advance.
+        retriesForCurrentRun = 0
         accumulatedReadings.add(reading)
 
         if (currentRunIndex < total) {
@@ -608,5 +677,7 @@ class BpClient(
         private const val CLIENT_CONFIG_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         private const val LOW_BATTERY = 20
         private const val CRITICAL_BATTERY = 10
+        private const val MAX_RETRIES = 3
+        private const val RETRY_DELAY_SECONDS = 10
     }
 }

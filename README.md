@@ -12,6 +12,7 @@ Features the Android port adds beyond the iOS app's feature set:
 
 - **Bottom navigation** — Settings and About destinations alongside the measurement screen
 - **Configurable readings** — take 1, 2, or 3 readings per measurement (averaged when more than one), selectable in Settings
+- **Retry on invalid reading** — an implausible reading prompts a retry; three consecutive failures auto-cancel the measurement
 
 ## 📋 Inherited from iOS
 

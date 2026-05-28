@@ -24,6 +24,12 @@ fun BpStatus.text(): String = when (this) {
     BpStatus.MeasurementInvalid -> stringResource(R.string.status_measurement_invalid)
     BpStatus.AverageSessionInvalid -> stringResource(R.string.status_average_session_invalid)
     BpStatus.AverageReadingInvalid -> stringResource(R.string.status_average_reading_invalid)
+    is BpStatus.RetryPrompt -> if (totalRuns > 1) {
+        stringResource(R.string.status_retry_prompt_multi, failedRun, totalRuns)
+    } else {
+        stringResource(R.string.status_retry_prompt_single)
+    }
+    BpStatus.RetryLimitExceeded -> stringResource(R.string.status_retry_limit_exceeded)
     is BpStatus.NotifyError -> stringResource(R.string.status_notify_error, gattStatus)
 }
 
