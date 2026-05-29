@@ -16,6 +16,11 @@
     <string name="action_stop_measurement">Stop Measurement</string>
     <string name="action_retry_connect">Retry Connect</string>
 
+    <!-- Guest mode (take readings without saving them to your history) -->
+    <string name="guest_mode_label">Guest mode</string>
+    <string name="guest_mode_hint">Take readings without saving them to your history</string>
+    <string name="guest_mode_banner">Guest mode on — readings won\'t be saved</string>
+
     <!-- Settings -->
     <string name="setting_save_to_health">Save to Health Connect</string>
     <string name="setting_readings_per_measurement">Readings per measurement</string>

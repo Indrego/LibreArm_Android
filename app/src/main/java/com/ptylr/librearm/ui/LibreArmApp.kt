@@ -83,6 +83,9 @@ fun LibreArmApp(
     val readingInvalidMessage = stringResource(R.string.toast_reading_invalid)
 
     var autoSaveToHealth by rememberSaveable { mutableStateOf(preferences.autoSaveToHealth) }
+    // Transient by design: a guest session shouldn't outlive the app's lifetime,
+    // so it lives in saveable UI state rather than persisted preferences.
+    var guestMode by rememberSaveable { mutableStateOf(false) }
     var healthWriteGranted by remember { mutableStateOf(false) }
     var healthBpReadGranted by remember { mutableStateOf(false) }
     var healthHrReadGranted by remember { mutableStateOf(false) }
@@ -167,9 +170,9 @@ fun LibreArmApp(
         onPauseOrDispose { }
     }
 
-    LaunchedEffect(autoSaveToHealth, healthWriteGranted) {
+    LaunchedEffect(autoSaveToHealth, healthWriteGranted, guestMode) {
         viewModel.setOnFinalReading { reading ->
-            if (!autoSaveToHealth || !healthWriteGranted) return@setOnFinalReading
+            if (guestMode || !autoSaveToHealth || !healthWriteGranted) return@setOnFinalReading
             scope.launch {
                 when (healthManager.saveReading(reading, Instant.now().toEpochMilli())) {
                     HealthConnectManager.SaveResult.Saved -> {
@@ -266,6 +269,9 @@ fun LibreArmApp(
                 MainScreen(
                     state = state,
                     history = history,
+                    guestMode = guestMode,
+                    showGuestControls = autoSaveToHealth && healthWriteGranted,
+                    onGuestModeChange = { guestMode = it },
                     onStartStop = {
                         if (state.isMeasuring) viewModel.cancelMeasurement() else viewModel.startMeasurement()
                     },

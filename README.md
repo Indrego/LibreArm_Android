@@ -15,6 +15,7 @@ Features the Android port adds beyond the iOS app's feature set:
 - **Retry on invalid reading** — an implausible reading prompts a retry; three consecutive failures auto-cancel the measurement
 - **Dark mode** — Auto / Light / Dark theme selector in Settings, applied immediately
 - **Measurement history** — Calendar and Trends views of past blood-pressure and heart-rate readings, read back from Health Connect
+- **Guest mode** — a sticky toggle to take readings that display but aren't saved to your history, for when you hand the cuff to someone else
 
 ## 📋 Inherited from iOS
 
