@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Button
@@ -22,6 +23,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -44,6 +47,9 @@ import java.time.format.DateTimeFormatter
 fun MainScreen(
     state: BpState,
     history: List<HistoricalReading>,
+    guestMode: Boolean,
+    showGuestControls: Boolean,
+    onGuestModeChange: (Boolean) -> Unit,
     onStartStop: () -> Unit,
     onRetryConnect: () -> Unit,
     modifier: Modifier = Modifier
@@ -61,8 +67,19 @@ fun MainScreen(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (showGuestControls && guestMode) {
+            GuestModeBanner()
+        }
         StatusRow(state, batteryColor)
         ReadingCard(state)
+
+        if (showGuestControls) {
+            GuestModeToggle(
+                checked = guestMode,
+                enabled = !state.isMeasuring,
+                onCheckedChange = onGuestModeChange
+            )
+        }
 
         Button(
             onClick = onStartStop,
@@ -110,6 +127,55 @@ private fun StatusRow(state: BpState, batteryColor: Color) {
             state.battery.text(),
             style = MaterialTheme.typography.bodySmall,
             color = batteryColor
+        )
+    }
+}
+
+@Composable
+private fun GuestModeBanner() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(imageVector = Icons.Default.Person, contentDescription = null)
+            Text(
+                stringResource(R.string.guest_mode_banner),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+@Composable
+private fun GuestModeToggle(
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(stringResource(R.string.guest_mode_label))
+            Text(
+                stringResource(R.string.guest_mode_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled
         )
     }
 }
